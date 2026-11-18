@@ -1,3 +1,4 @@
+pub mod password;
 use axum::{Json, Router, routing::get};
 use serde::Serialize;
 use sqlx::PgPool;
