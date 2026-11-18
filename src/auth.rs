@@ -1,9 +1,10 @@
 use crate::{AppState, password};
 use axum::{
     Json, Router,
-    extract::{State, rejection::JsonRejection},
-    http::StatusCode,
-    routing::post,
+    extract::{FromRequestParts, State, rejection::JsonRejection},
+    http::{StatusCode, header::AUTHORIZATION, request::Parts},
+    response::{IntoResponse, Response},
+    routing::{get, post},
 };
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
+        .route("/me", get(me))
 }
 
 async fn register(
@@ -251,6 +253,77 @@ async fn login(
         expires_in,
         user: UserResponse { id, name, email },
     }))
+}
+pub struct AuthUser {
+    pub id: Uuid,
+    pub name: String,
+    pub email: String,
+}
+
+impl FromRequestParts<AppState> for AuthUser {
+    type Rejection = Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let unauthorized = || {
+            api_error(
+                StatusCode::UNAUTHORIZED,
+                "A valid login session is required",
+            )
+            .into_response()
+        };
+
+        let mut headers = parts.headers.get_all(AUTHORIZATION).iter();
+        let header = headers.next().ok_or_else(unauthorized)?;
+
+        if headers.next().is_some() {
+            return Err(unauthorized());
+        }
+
+        let header = header.to_str().map_err(|_| unauthorized())?;
+        let (scheme, token) = header.split_once(' ').ok_or_else(unauthorized)?;
+
+        if !scheme.eq_ignore_ascii_case("Bearer")
+            || token.len() != 64
+            || !token.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(unauthorized());
+        }
+
+        let token_hash = Sha256::digest(token.as_bytes()).to_vec();
+
+        let user = sqlx::query_as::<_, (Uuid, String, String)>(
+            "SELECT users.id, users.name, users.email
+             FROM login_sessions
+             JOIN users ON users.id = login_sessions.user_id
+             WHERE login_sessions.token_hash = $1
+               AND login_sessions.expires_at > now()",
+        )
+        .bind(&token_hash)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Unable to verify login session",
+            )
+            .into_response()
+        })?;
+
+        let (id, name, email) = user.ok_or_else(unauthorized)?;
+
+        Ok(Self { id, name, email })
+    }
+}
+
+async fn me(user: AuthUser) -> Json<UserResponse> {
+    Json(UserResponse {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+    })
 }
 
 #[cfg(test)]
