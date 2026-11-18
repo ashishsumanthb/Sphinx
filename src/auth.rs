@@ -1,13 +1,14 @@
+use crate::{AppState, password};
 use axum::{
     Json, Router,
     extract::{State, rejection::JsonRejection},
     http::StatusCode,
     routing::post,
 };
+use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
-
-use crate::{AppState, password};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,6 +29,20 @@ struct UserResponse {
 struct ErrorResponse {
     error: &'static str,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoginRequest {
+    email: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+struct LoginResponse {
+    token: String,
+    token_type: &'static str,
+    expires_in: i64,
+    user: UserResponse,
+}
 
 type ApiError = (StatusCode, Json<ErrorResponse>);
 
@@ -36,7 +51,9 @@ fn api_error(status: StatusCode, message: &'static str) -> ApiError {
 }
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/register", post(register))
+    Router::new()
+        .route("/register", post(register))
+        .route("/login", post(login))
 }
 
 async fn register(
@@ -151,6 +168,89 @@ fn valid_email(email: &str) -> bool {
         });
 
     valid_local && valid_domain
+}
+fn generate_session_token() -> Result<(String, Vec<u8>), ApiError> {
+    let mut random_bytes = [0u8; 32];
+
+    OsRng.try_fill_bytes(&mut random_bytes).map_err(|_| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Unable to create login session",
+        )
+    })?;
+
+    let token = hex::encode(random_bytes);
+    let token_hash = Sha256::digest(token.as_bytes()).to_vec();
+
+    Ok((token, token_hash))
+}
+
+async fn login(
+    State(state): State<AppState>,
+    payload: Result<Json<LoginRequest>, JsonRejection>,
+) -> Result<Json<LoginResponse>, ApiError> {
+    let Json(request) = payload.map_err(|error| {
+        api_error(
+            error.status(),
+            "Expected JSON with email and password fields",
+        )
+    })?;
+
+    let email = request.email.trim().to_lowercase();
+
+    if !valid_email(&email) || !(8..=128).contains(&request.password.chars().count()) {
+        return Err(api_error(
+            StatusCode::UNAUTHORIZED,
+            "Invalid email or password",
+        ));
+    }
+
+    let saved_user = sqlx::query_as::<_, (Uuid, String, String, String)>(
+        "SELECT id, name, email, password_encoded
+         FROM users
+         WHERE email = $1",
+    )
+    .bind(&email)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to log in"))?;
+
+    let (id, name, email, password_encoded) = saved_user
+        .ok_or_else(|| api_error(StatusCode::UNAUTHORIZED, "Invalid email or password"))?;
+
+    // Verify the reversible demo encoding without decoding it.
+    if password::encode(&request.password) != password_encoded {
+        return Err(api_error(
+            StatusCode::UNAUTHORIZED,
+            "Invalid email or password",
+        ));
+    }
+
+    let (token, token_hash) = generate_session_token()?;
+    let expires_in: i64 = 3600;
+
+    sqlx::query(
+        "INSERT INTO login_sessions (token_hash, user_id, expires_at)
+         VALUES ($1, $2, now() + make_interval(secs => $3))",
+    )
+    .bind(&token_hash)
+    .bind(id)
+    .bind(expires_in as f64)
+    .execute(&state.pool)
+    .await
+    .map_err(|_| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Unable to create login session",
+        )
+    })?;
+
+    Ok(Json(LoginResponse {
+        token,
+        token_type: "Bearer",
+        expires_in,
+        user: UserResponse { id, name, email },
+    }))
 }
 
 #[cfg(test)]

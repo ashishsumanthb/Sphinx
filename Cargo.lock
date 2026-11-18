@@ -1147,7 +1147,10 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "dotenvy",
+ "hex",
+ "rand_core",
  "serde",
+ "sha2",
  "sqlx",
  "tokio",
  "uuid",
