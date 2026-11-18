@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod password;
 use axum::{Json, Router, routing::get};
 use serde::Serialize;
@@ -20,9 +21,9 @@ async fn health() -> Json<HealthResponse> {
         service: "sphinx",
     })
 }
-
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health/live", get(health))
+        .nest("/api/v1/auth", auth::routes())
         .with_state(state)
 }
