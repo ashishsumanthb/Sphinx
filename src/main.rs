@@ -26,6 +26,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Connected to PostgreSQL");
 
+    sqlx::migrate::Migrator::new(std::path::Path::new("./migrations"))
+        .await?
+        .run(&pool)
+        .await?;
+
+    println!("Database migrations applied");
+
     let state = sphinx::AppState { pool };
     let listener = TcpListener::bind("127.0.0.1:8000").await?;
 
