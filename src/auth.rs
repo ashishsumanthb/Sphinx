@@ -56,6 +56,7 @@ pub fn routes() -> Router<AppState> {
         .route("/register", post(register))
         .route("/login", post(login))
         .route("/me", get(me))
+        .route("/logout", post(logout))
 }
 
 async fn register(
@@ -254,10 +255,12 @@ async fn login(
         user: UserResponse { id, name, email },
     }))
 }
+
 pub struct AuthUser {
     pub id: Uuid,
     pub name: String,
     pub email: String,
+    token_hash: Vec<u8>,
 }
 
 impl FromRequestParts<AppState> for AuthUser {
@@ -314,7 +317,12 @@ impl FromRequestParts<AppState> for AuthUser {
 
         let (id, name, email) = user.ok_or_else(unauthorized)?;
 
-        Ok(Self { id, name, email })
+        Ok(Self {
+            id,
+            name,
+            email,
+            token_hash,
+        })
     }
 }
 
@@ -325,8 +333,18 @@ async fn me(user: AuthUser) -> Json<UserResponse> {
         email: user.email,
     })
 }
+async fn logout(State(state): State<AppState>, user: AuthUser) -> Result<StatusCode, ApiError> {
+    sqlx::query("DELETE FROM login_sessions WHERE token_hash = $1")
+        .bind(&user.token_hash)
+        .execute(&state.pool)
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to log out"))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
 
 #[cfg(test)]
+
 mod tests {
     use super::{RegisterRequest, validate_registration};
 
