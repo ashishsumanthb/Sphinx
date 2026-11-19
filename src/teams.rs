@@ -22,11 +22,11 @@ struct CreateTeamRequest {
 struct TeamResponse {
     id: Uuid,
     name: String,
-    role: &'static str,
+    role: String,
 }
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/", post(create_team))
+    Router::new().route("/", post(create_team).get(list_teams))
 }
 
 async fn create_team(
@@ -83,9 +83,33 @@ async fn create_team(
         Json(TeamResponse {
             id,
             name,
-            role: "admin",
+            role: "admin".to_owned(),
         }),
     ))
+}
+async fn list_teams(
+    State(state): State<AppState>,
+    user: AuthUser,
+) -> Result<Json<Vec<TeamResponse>>, ApiError> {
+    let rows = sqlx::query_as::<_, (Uuid, String, String)>(
+        "SELECT teams.id, teams.name, team_memberships.role
+         FROM teams
+         JOIN team_memberships
+           ON team_memberships.team_id = teams.id
+         WHERE team_memberships.user_id = $1
+         ORDER BY teams.created_at, teams.id",
+    )
+    .bind(user.id)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to list teams"))?;
+
+    let teams = rows
+        .into_iter()
+        .map(|(id, name, role)| TeamResponse { id, name, role })
+        .collect();
+
+    Ok(Json(teams))
 }
 
 fn team_error(_error: sqlx::Error) -> ApiError {
