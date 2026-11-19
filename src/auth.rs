@@ -27,9 +27,10 @@ struct UserResponse {
 }
 
 #[derive(Serialize)]
-struct ErrorResponse {
+pub(crate) struct ErrorResponse {
     error: &'static str,
 }
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LoginRequest {
@@ -45,9 +46,9 @@ struct LoginResponse {
     user: UserResponse,
 }
 
-type ApiError = (StatusCode, Json<ErrorResponse>);
+pub(crate) type ApiError = (StatusCode, Json<ErrorResponse>);
 
-fn api_error(status: StatusCode, message: &'static str) -> ApiError {
+pub(crate) fn api_error(status: StatusCode, message: &'static str) -> ApiError {
     (status, Json(ErrorResponse { error: message }))
 }
 

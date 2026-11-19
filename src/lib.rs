@@ -1,5 +1,7 @@
 pub mod auth;
 pub mod password;
+pub mod teams;
+
 use axum::{Json, Router, routing::get};
 use serde::Serialize;
 use sqlx::PgPool;
@@ -21,9 +23,11 @@ async fn health() -> Json<HealthResponse> {
         service: "sphinx",
     })
 }
+
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health/live", get(health))
         .nest("/api/v1/auth", auth::routes())
+        .nest("/api/v1/teams", teams::routes())
         .with_state(state)
 }
