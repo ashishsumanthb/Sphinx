@@ -1,4 +1,8 @@
-# StandupPulse — Participation & Scoring
+# Sphinx
+
+Team quiz and knowledge-sharing backend built with Rust, Axum, SQLx and PostgreSQL.
+
+## Participation and scoring
 
 This branch contains Member 3's end-to-end participation feature: safe quiz
 questions, attempt sessions, deterministic scoring, atomic persistence,
