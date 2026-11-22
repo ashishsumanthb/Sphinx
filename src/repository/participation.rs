@@ -247,8 +247,25 @@ impl ParticipationRepository {
         .bind(session_id)
         .bind(user_id)
         .fetch_optional(&mut *transaction)
-        .await?
-        .ok_or_else(|| AppError::not_found("Attempt session"))?;
+        .await?;
+        let session = match session {
+            Some(session) => session,
+            None => {
+                if let Some(existing) =
+                    find_attempt_by_session(&mut transaction, session_id, user_id).await?
+                {
+                    transaction.commit().await?;
+                    if existing.6 == request_hash {
+                        return Ok(to_submit_response(existing, true));
+                    }
+                    return Err(AppError::conflict(
+                        "SESSION_ALREADY_SUBMITTED",
+                        "This session was already submitted with different answers",
+                    ));
+                }
+                return Err(AppError::not_found("Attempt session"));
+            }
+        };
         ensure_open(&session.2, session.3, session.4, session.5, session.6)?;
 
         let another_attempt = sqlx::query_scalar::<_, bool>(
@@ -470,11 +487,13 @@ impl ParticipationRepository {
         .bind(quiz_id)
         .fetch_one(&self.pool)
         .await?;
-        let rows = sqlx::query_as::<_, (Uuid, i32, i32, f64, i64)>(
-            r#"SELECT user_id, score, total_questions,
-                      score::double precision * 100.0 / total_questions,
-                      RANK() OVER (ORDER BY score::double precision / total_questions DESC)
-               FROM quiz_attempts WHERE quiz_id = $1"#,
+        let rows = sqlx::query_as::<_, (Uuid, i32, i32, i32, f64, i64)>(
+            r#"SELECT a.user_id, r.revision_no, a.score, a.total_questions,
+                      a.score::double precision * 100.0 / a.total_questions,
+                      RANK() OVER (PARTITION BY a.quiz_revision_id
+                                   ORDER BY a.score::double precision / a.total_questions DESC)
+               FROM quiz_attempts a JOIN quiz_revisions r ON r.id = a.quiz_revision_id
+               WHERE a.quiz_id = $1"#,
         )
         .bind(quiz_id)
         .fetch_all(&self.pool)
@@ -491,10 +510,11 @@ impl ParticipationRepository {
                 .into_iter()
                 .map(|row| ParticipantAnalyticsResponse {
                     user_id: row.0,
-                    score: row.1 as u32,
-                    total_questions: row.2 as u32,
-                    percentage: row.3,
-                    rank: row.4 as u64,
+                    revision_number: row.1 as u32,
+                    score: row.2 as u32,
+                    total_questions: row.3 as u32,
+                    percentage: row.4,
+                    rank: row.5 as u64,
                 })
                 .collect(),
         })

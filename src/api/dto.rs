@@ -109,6 +109,7 @@ pub struct MyResultsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParticipantAnalyticsResponse {
     pub user_id: Uuid,
+    pub revision_number: u32,
     pub score: u32,
     pub total_questions: u32,
     pub percentage: f64,

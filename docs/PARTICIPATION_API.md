@@ -63,6 +63,24 @@ cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 ```
 
+Run the PostgreSQL timing, concurrency, rollback, retry, authorization,
+constraint, analytics, and dependency-failure matrix against an isolated test
+database:
+
+```bash
+docker run --name sphinx-edge-postgres \
+  -e POSTGRES_PASSWORD=edgepass -e POSTGRES_DB=sphinx_edge \
+  -p 127.0.0.1:55432:5432 -d postgres:17-alpine
+
+TEST_DATABASE_URL=postgres://postgres:edgepass@127.0.0.1:55432/sphinx_edge \
+  cargo test --test postgres_edge_cases -- --ignored --nocapture
+
+docker rm -f sphinx-edge-postgres
+```
+
+The test resets the `public` schema and must never target a development or
+production database.
+
 ## Integration dependencies
 
 - Member 1: `users`, `team_members`, and authenticated-user middleware.
