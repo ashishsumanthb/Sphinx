@@ -71,8 +71,8 @@ mod tests {
             Err("Question was answered more than once")
         );
     }
-    
-    
+
+
     fn answer(question_id: Uuid, selected_option_index: usize) -> AnswerInput {
     AnswerInput {
         question_id,

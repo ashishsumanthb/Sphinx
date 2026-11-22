@@ -11,7 +11,7 @@ pub(crate) enum QuizStatus {
     Draft,
     Open,
     Closed,
-    
+
 }
 pub(crate) fn is_quiz_open(
     status:QuizStatus,
