@@ -65,6 +65,14 @@ impl AppError {
         )
     }
 
+    pub fn payload_too_large() -> Self {
+        Self::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "PAYLOAD_TOO_LARGE",
+            "The request payload is too large",
+        )
+    }
+
     pub fn code(&self) -> &'static str {
         self.code
     }

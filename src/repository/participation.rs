@@ -6,7 +6,9 @@ use crate::{
     api::{
         dto::{
             AnswerInput, AttemptSessionResponse, AvailableQuizResponse, MyAttemptResponse,
-            PublicQuestionResponse, SubmitAttemptResponse,
+            AttemptQuestionReviewResponse, AttemptReviewResponse, MyResultsResponse,
+            ParticipantAnalyticsResponse, PublicQuestionResponse, QuizAnalyticsResponse,
+            SubmitAttemptResponse,
         },
         error::AppError,
     },
@@ -351,6 +353,151 @@ impl ParticipationRepository {
                 submitted_at: row.4,
             })
             .collect())
+    }
+
+    pub async fn attempt_review(
+        &self,
+        attempt_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<AttemptReviewResponse, AppError> {
+        let attempt = sqlx::query_as::<_, (Uuid, Uuid, i32, i32, DateTime<Utc>, Uuid)>(
+            r#"SELECT a.id, a.quiz_id, a.score, a.total_questions, a.submitted_at, a.user_id
+               FROM quiz_attempts a JOIN quizzes q ON q.id = a.quiz_id
+               WHERE a.id = $1 AND (
+                   a.user_id = $2 OR EXISTS (
+                       SELECT 1 FROM team_members tm
+                       WHERE tm.team_id = q.team_id AND tm.user_id = $2 AND tm.role = 'admin'
+                   )
+               )"#,
+        )
+        .bind(attempt_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| AppError::forbidden("Only the attempt owner or team admin may review it"))?;
+        let rows = sqlx::query_as::<_, (Uuid, i32, String, serde_json::Value, i32, i32, bool, String)>(
+            r#"SELECT qv.id, qv.position, qv.question_text, qv.options,
+                      aa.selected_option_index, qv.correct_option_index, aa.is_correct, qv.explanation
+               FROM attempt_answers aa JOIN question_versions qv ON qv.id = aa.question_version_id
+               WHERE aa.attempt_id = $1 ORDER BY qv.position"#,
+        )
+        .bind(attempt_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let questions = rows
+            .into_iter()
+            .map(|row| {
+                Ok(AttemptQuestionReviewResponse {
+                    question_id: row.0,
+                    position: row.1 as u32,
+                    question_text: row.2,
+                    options: serde_json::from_value(row.3).map_err(|_| AppError::internal())?,
+                    selected_option_index: row.4 as u16,
+                    correct_option_index: row.5 as u16,
+                    is_correct: row.6,
+                    explanation: row.7,
+                })
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
+        Ok(AttemptReviewResponse {
+            attempt_id: attempt.0,
+            quiz_id: attempt.1,
+            score: attempt.2 as u32,
+            total_questions: attempt.3 as u32,
+            percentage: percentage(attempt.2 as u32, attempt.3 as u32),
+            submitted_at: attempt.4,
+            questions,
+        })
+    }
+
+    pub async fn my_results(
+        &self,
+        quiz_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<MyResultsResponse, AppError> {
+        let attempts = self.my_attempts(quiz_id, user_id).await?;
+        let ranked = sqlx::query_as::<_, (i32, i64)>(
+            r#"WITH scores AS (
+                   SELECT a.user_id, r.revision_no,
+                          MAX(a.score::double precision / a.total_questions) AS ratio
+                   FROM quiz_attempts a JOIN quiz_revisions r ON r.id = a.quiz_revision_id
+                   WHERE a.quiz_id = $1 GROUP BY a.user_id, r.revision_no
+               ), ranked AS (
+                   SELECT *, RANK() OVER (PARTITION BY revision_no ORDER BY ratio DESC) AS rank
+                   FROM scores
+               ) SELECT revision_no, rank FROM ranked WHERE user_id = $2
+               ORDER BY revision_no DESC LIMIT 1"#,
+        )
+        .bind(quiz_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let best = attempts
+            .iter()
+            .max_by(|left, right| left.percentage.total_cmp(&right.percentage));
+        Ok(MyResultsResponse {
+            quiz_id,
+            best_score: best.map(|attempt| attempt.score),
+            best_percentage: best.map(|attempt| attempt.percentage),
+            revision_number: ranked.map(|row| row.0 as u32),
+            rank: ranked.map(|row| row.1 as u64),
+            attempts,
+        })
+    }
+
+    pub async fn quiz_analytics(
+        &self,
+        quiz_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<QuizAnalyticsResponse, AppError> {
+        let authorized = sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(SELECT 1 FROM quizzes q JOIN team_members tm ON tm.team_id = q.team_id
+               WHERE q.id = $1 AND tm.user_id = $2 AND tm.role = 'admin')"#,
+        )
+        .bind(quiz_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        if !authorized {
+            return Err(AppError::forbidden("Team administrator access is required"));
+        }
+        let counts = sqlx::query_as::<_, (i64, i64, i64, Option<f64>)>(
+            r#"SELECT (SELECT COUNT(*) FROM quiz_eligibilities WHERE quiz_id = $1),
+                      COUNT(DISTINCT user_id), COUNT(*),
+                      AVG(score::double precision * 100.0 / total_questions)
+               FROM quiz_attempts WHERE quiz_id = $1"#,
+        )
+        .bind(quiz_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let rows = sqlx::query_as::<_, (Uuid, i32, i32, f64, i64)>(
+            r#"SELECT user_id, score, total_questions,
+                      score::double precision * 100.0 / total_questions,
+                      RANK() OVER (ORDER BY score::double precision / total_questions DESC)
+               FROM quiz_attempts WHERE quiz_id = $1"#,
+        )
+        .bind(quiz_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(QuizAnalyticsResponse {
+            quiz_id,
+            eligible_members: counts.0 as u64,
+            unique_participants: counts.1 as u64,
+            total_submissions: counts.2 as u64,
+            participation_rate: (counts.0 > 0)
+                .then(|| counts.1 as f64 * 100.0 / counts.0 as f64),
+            average_score_percentage: counts.3,
+            participants: rows
+                .into_iter()
+                .map(|row| ParticipantAnalyticsResponse {
+                    user_id: row.0,
+                    score: row.1 as u32,
+                    total_questions: row.2 as u32,
+                    percentage: row.3,
+                    rank: row.4 as u64,
+                })
+                .collect(),
+        })
     }
 }
 

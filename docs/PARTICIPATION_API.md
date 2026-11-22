@@ -13,6 +13,9 @@ middleware to insert `AuthenticatedUser` into the request extensions.
 | `GET` | `/api/v1/attempt-sessions/{session_id}/questions` | Owner-only questions without answers or explanations |
 | `POST` | `/api/v1/attempt-sessions/{session_id}/submit` | Validates, scores, and atomically saves one attempt |
 | `GET` | `/api/v1/quizzes/{quiz_id}/my-attempts` | Returns only the authenticated user's attempt |
+| `GET` | `/api/v1/attempts/{attempt_id}/review` | Owner or team-admin post-submit answer review |
+| `GET` | `/api/v1/quizzes/{quiz_id}/my-results` | Own best result and revision-specific rank |
+| `GET` | `/api/v1/quizzes/{quiz_id}/analytics` | Team-admin participation, averages, and rankings |
 
 ## Submission
 
@@ -45,8 +48,20 @@ retry for the same session with different answers returns
 
 Pre-submission responses contain only `question_id`, `position`,
 `question_text`, and `options`. They never serialize `correct_option_index`,
-`is_correct`, or `explanation`. Closed-quiz review and analytics belong to
-Member 4.
+`is_correct`, or `explanation`. Correct answers and explanations appear only in
+the submitted attempt owner's review or to an administrator of that quiz's
+team. Member result endpoints take identity exclusively from authentication and
+never accept a user ID.
+
+Requests are limited to 1 MiB. Oversized requests return the standard
+`PAYLOAD_TOO_LARGE` error envelope.
+
+## Verification
+
+```bash
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
+```
 
 ## Integration dependencies
 
