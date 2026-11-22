@@ -74,7 +74,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/", post(create_team).get(list_teams))
         .route("/{team_id}/members", post(add_member).get(list_members))
-        .route("/{team_id}/members/{user_id}", patch(update_member_role))
+        .route(
+            "/{team_id}/members/{user_id}",
+            patch(update_member_role).delete(remove_member),
+        )
 }
 
 async fn create_team(
@@ -175,7 +178,7 @@ async fn add_member(
 
     let mut transaction = state.pool.begin().await.map_err(member_error)?;
 
-    // Lock the team first in every membership-changing handler.
+    // Membership changes lock the team first to serialize changes within it.
     let team = sqlx::query_as::<_, (Uuid,)>(
         "SELECT id
          FROM teams
@@ -336,7 +339,6 @@ async fn update_member_role(
 
     let mut transaction = state.pool.begin().await.map_err(role_error)?;
 
-    // Serialize membership changes for this team.
     let team = sqlx::query_as::<_, (Uuid,)>(
         "SELECT id
          FROM teams
@@ -434,11 +436,107 @@ async fn update_member_role(
     }))
 }
 
-fn list_members_error(_error: sqlx::Error) -> ApiError {
-    api_error(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Unable to list team members",
+async fn remove_member(
+    State(state): State<AppState>,
+    user: AuthUser,
+    path: Result<Path<(Uuid, Uuid)>, PathRejection>,
+) -> Result<StatusCode, ApiError> {
+    let Path((team_id, target_user_id)) = path.map_err(|_| {
+        api_error(
+            StatusCode::BAD_REQUEST,
+            "Team ID and user ID must be valid UUIDs",
+        )
+    })?;
+
+    let mut transaction = state.pool.begin().await.map_err(remove_member_error)?;
+
+    let team = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT id
+         FROM teams
+         WHERE id = $1
+         FOR UPDATE",
     )
+    .bind(team_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(remove_member_error)?;
+
+    if team.is_none() {
+        return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
+    }
+
+    let caller = sqlx::query_as::<_, (String,)>(
+        "SELECT role
+         FROM team_memberships
+         WHERE team_id = $1 AND user_id = $2
+         FOR UPDATE",
+    )
+    .bind(team_id)
+    .bind(user.id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(remove_member_error)?;
+
+    match caller {
+        Some((role,)) if role == "admin" => {}
+        Some(_) => {
+            return Err(api_error(
+                StatusCode::FORBIDDEN,
+                "Only team admins can remove members",
+            ));
+        }
+        None => {
+            return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
+        }
+    }
+
+    let target = sqlx::query_as::<_, (String,)>(
+        "SELECT role
+         FROM team_memberships
+         WHERE team_id = $1 AND user_id = $2
+         FOR UPDATE",
+    )
+    .bind(team_id)
+    .bind(target_user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(remove_member_error)?;
+
+    let (role,) =
+        target.ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Team member not found"))?;
+
+    if role == "admin" {
+        let (admin_count,) = sqlx::query_as::<_, (i64,)>(
+            "SELECT COUNT(*)
+             FROM team_memberships
+             WHERE team_id = $1 AND role = 'admin'",
+        )
+        .bind(team_id)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(remove_member_error)?;
+
+        if admin_count <= 1 {
+            return Err(api_error(
+                StatusCode::CONFLICT,
+                "Cannot remove the last team admin",
+            ));
+        }
+    }
+
+    sqlx::query(
+        "DELETE FROM team_memberships
+         WHERE team_id = $1 AND user_id = $2",
+    )
+    .bind(team_id)
+    .bind(target_user_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(remove_member_error)?;
+
+    transaction.commit().await.map_err(remove_member_error)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn team_error(_error: sqlx::Error) -> ApiError {
@@ -452,9 +550,23 @@ fn member_error(_error: sqlx::Error) -> ApiError {
     )
 }
 
+fn list_members_error(_error: sqlx::Error) -> ApiError {
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to list team members",
+    )
+}
+
 fn role_error(_error: sqlx::Error) -> ApiError {
     api_error(
         StatusCode::INTERNAL_SERVER_ERROR,
         "Unable to update member role",
+    )
+}
+
+fn remove_member_error(_error: sqlx::Error) -> ApiError {
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to remove team member",
     )
 }
