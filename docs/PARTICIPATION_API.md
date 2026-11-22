@@ -54,3 +54,8 @@ Member 4.
 - Member 2: `quizzes`, `quiz_revisions`, `question_versions`, and the
   `quiz_eligibilities` snapshot.
 - Member 4: reads committed attempts; it must not recompute saved scores.
+
+Until those branches are integrated, `fixtures/participation_flow.json` provides
+design-aligned records for all upstream tables, the submission request, safe API
+responses, and the expected persisted attempt rows. The fixture is validated by
+`tests/mock_fixture.rs`, so DTO or relationship drift fails the test suite.
