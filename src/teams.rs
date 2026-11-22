@@ -5,7 +5,7 @@ use axum::{
         rejection::{JsonRejection, PathRejection},
     },
     http::StatusCode,
-    routing::post,
+    routing::{patch, post},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -47,10 +47,34 @@ struct TeamMemberResponse {
     name: String,
     role: String,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum TeamRole {
+    Admin,
+    Member,
+}
+
+impl TeamRole {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Member => "member",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateRoleRequest {
+    role: TeamRole,
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/", post(create_team).get(list_teams))
         .route("/{team_id}/members", post(add_member).get(list_members))
+        .route("/{team_id}/members/{user_id}", patch(update_member_role))
 }
 
 async fn create_team(
@@ -290,6 +314,126 @@ async fn list_members(
     Ok(Json(members))
 }
 
+async fn update_member_role(
+    State(state): State<AppState>,
+    user: AuthUser,
+    path: Result<Path<(Uuid, Uuid)>, PathRejection>,
+    payload: Result<Json<UpdateRoleRequest>, JsonRejection>,
+) -> Result<Json<MemberResponse>, ApiError> {
+    let Path((team_id, target_user_id)) = path.map_err(|_| {
+        api_error(
+            StatusCode::BAD_REQUEST,
+            "Team ID and user ID must be valid UUIDs",
+        )
+    })?;
+
+    let Json(request) = payload.map_err(|error| {
+        api_error(
+            error.status(),
+            "Expected JSON with role set to admin or member",
+        )
+    })?;
+
+    let mut transaction = state.pool.begin().await.map_err(role_error)?;
+
+    // Serialize membership changes for this team.
+    let team = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT id
+         FROM teams
+         WHERE id = $1
+         FOR UPDATE",
+    )
+    .bind(team_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(role_error)?;
+
+    if team.is_none() {
+        return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
+    }
+
+    let caller = sqlx::query_as::<_, (String,)>(
+        "SELECT role
+         FROM team_memberships
+         WHERE team_id = $1 AND user_id = $2
+         FOR UPDATE",
+    )
+    .bind(team_id)
+    .bind(user.id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(role_error)?;
+
+    match caller {
+        Some((role,)) if role == "admin" => {}
+        Some(_) => {
+            return Err(api_error(
+                StatusCode::FORBIDDEN,
+                "Only team admins can change roles",
+            ));
+        }
+        None => {
+            return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
+        }
+    }
+
+    let target = sqlx::query_as::<_, (String,)>(
+        "SELECT role
+         FROM team_memberships
+         WHERE team_id = $1 AND user_id = $2
+         FOR UPDATE",
+    )
+    .bind(team_id)
+    .bind(target_user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(role_error)?;
+
+    let (current_role,) =
+        target.ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Team member not found"))?;
+
+    let new_role = request.role.as_str();
+
+    if current_role == "admin" && new_role == "member" {
+        let (admin_count,) = sqlx::query_as::<_, (i64,)>(
+            "SELECT COUNT(*)
+             FROM team_memberships
+             WHERE team_id = $1 AND role = 'admin'",
+        )
+        .bind(team_id)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(role_error)?;
+
+        if admin_count <= 1 {
+            return Err(api_error(
+                StatusCode::CONFLICT,
+                "Cannot demote the last team admin",
+            ));
+        }
+    }
+
+    sqlx::query(
+        "UPDATE team_memberships
+         SET role = $1
+         WHERE team_id = $2 AND user_id = $3",
+    )
+    .bind(new_role)
+    .bind(team_id)
+    .bind(target_user_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(role_error)?;
+
+    transaction.commit().await.map_err(role_error)?;
+
+    Ok(Json(MemberResponse {
+        team_id,
+        user_id: target_user_id,
+        role: new_role.to_owned(),
+    }))
+}
+
 fn list_members_error(_error: sqlx::Error) -> ApiError {
     api_error(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -305,5 +449,12 @@ fn member_error(_error: sqlx::Error) -> ApiError {
     api_error(
         StatusCode::INTERNAL_SERVER_ERROR,
         "Unable to add team member",
+    )
+}
+
+fn role_error(_error: sqlx::Error) -> ApiError {
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to update member role",
     )
 }
