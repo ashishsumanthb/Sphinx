@@ -41,10 +41,16 @@ struct MemberResponse {
     role: String,
 }
 
+#[derive(Serialize)]
+struct TeamMemberResponse {
+    user_id: Uuid,
+    name: String,
+    role: String,
+}
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/", post(create_team).get(list_teams))
-        .route("/{team_id}/members", post(add_member))
+        .route("/{team_id}/members", post(add_member).get(list_members))
 }
 
 async fn create_team(
@@ -229,6 +235,66 @@ async fn add_member(
             role: "member".to_owned(),
         }),
     ))
+}
+
+async fn list_members(
+    State(state): State<AppState>,
+    user: AuthUser,
+    path: Result<Path<Uuid>, PathRejection>,
+) -> Result<Json<Vec<TeamMemberResponse>>, ApiError> {
+    let Path(team_id) =
+        path.map_err(|_| api_error(StatusCode::BAD_REQUEST, "Team ID must be a valid UUID"))?;
+
+    let mut transaction = state.pool.begin().await.map_err(list_members_error)?;
+
+    // Keep the caller's membership valid while reading the member list.
+    let membership = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT user_id
+         FROM team_memberships
+         WHERE team_id = $1 AND user_id = $2
+         FOR SHARE",
+    )
+    .bind(team_id)
+    .bind(user.id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(list_members_error)?;
+
+    if membership.is_none() {
+        return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
+    }
+
+    let rows = sqlx::query_as::<_, (Uuid, String, String)>(
+        "SELECT users.id, users.name, team_memberships.role
+         FROM team_memberships
+         JOIN users ON users.id = team_memberships.user_id
+         WHERE team_memberships.team_id = $1
+         ORDER BY team_memberships.joined_at, users.id",
+    )
+    .bind(team_id)
+    .fetch_all(&mut *transaction)
+    .await
+    .map_err(list_members_error)?;
+
+    transaction.commit().await.map_err(list_members_error)?;
+
+    let members = rows
+        .into_iter()
+        .map(|(user_id, name, role)| TeamMemberResponse {
+            user_id,
+            name,
+            role,
+        })
+        .collect();
+
+    Ok(Json(members))
+}
+
+fn list_members_error(_error: sqlx::Error) -> ApiError {
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to list team members",
+    )
 }
 
 fn team_error(_error: sqlx::Error) -> ApiError {
