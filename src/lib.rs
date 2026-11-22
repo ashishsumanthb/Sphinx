@@ -1,5 +1,7 @@
 pub mod auth;
 pub mod password;
+pub(crate) mod permissions;
+pub mod session;
 pub mod teams;
 
 use axum::{Json, Router, routing::get};

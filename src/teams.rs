@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::{ApiError, AuthUser, api_error},
+    permissions::{require_admin, require_member},
 };
 
 #[derive(Deserialize)]
@@ -178,7 +179,7 @@ async fn add_member(
 
     let mut transaction = state.pool.begin().await.map_err(member_error)?;
 
-    // Membership changes lock the team first to serialize changes within it.
+    // Serialize membership changes before checking the caller's permissions.
     let team = sqlx::query_as::<_, (Uuid,)>(
         "SELECT id
          FROM teams
@@ -194,30 +195,13 @@ async fn add_member(
         return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
     }
 
-    let membership = sqlx::query_as::<_, (String,)>(
-        "SELECT role
-         FROM team_memberships
-         WHERE team_id = $1 AND user_id = $2
-         FOR UPDATE",
+    require_admin(
+        &mut *transaction,
+        team_id,
+        user.id,
+        "Only team admins can add members",
     )
-    .bind(team_id)
-    .bind(user.id)
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(member_error)?;
-
-    match membership {
-        Some((role,)) if role == "admin" => {}
-        Some(_) => {
-            return Err(api_error(
-                StatusCode::FORBIDDEN,
-                "Only team admins can add members",
-            ));
-        }
-        None => {
-            return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
-        }
-    }
+    .await?;
 
     let target_user = sqlx::query_as::<_, (Uuid,)>(
         "SELECT id
@@ -274,22 +258,7 @@ async fn list_members(
 
     let mut transaction = state.pool.begin().await.map_err(list_members_error)?;
 
-    // Keep the caller's membership valid while reading the member list.
-    let membership = sqlx::query_as::<_, (Uuid,)>(
-        "SELECT user_id
-         FROM team_memberships
-         WHERE team_id = $1 AND user_id = $2
-         FOR SHARE",
-    )
-    .bind(team_id)
-    .bind(user.id)
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(list_members_error)?;
-
-    if membership.is_none() {
-        return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
-    }
+    require_member(&mut *transaction, team_id, user.id).await?;
 
     let rows = sqlx::query_as::<_, (Uuid, String, String)>(
         "SELECT users.id, users.name, team_memberships.role
@@ -354,30 +323,13 @@ async fn update_member_role(
         return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
     }
 
-    let caller = sqlx::query_as::<_, (String,)>(
-        "SELECT role
-         FROM team_memberships
-         WHERE team_id = $1 AND user_id = $2
-         FOR UPDATE",
+    require_admin(
+        &mut *transaction,
+        team_id,
+        user.id,
+        "Only team admins can change roles",
     )
-    .bind(team_id)
-    .bind(user.id)
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(role_error)?;
-
-    match caller {
-        Some((role,)) if role == "admin" => {}
-        Some(_) => {
-            return Err(api_error(
-                StatusCode::FORBIDDEN,
-                "Only team admins can change roles",
-            ));
-        }
-        None => {
-            return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
-        }
-    }
+    .await?;
 
     let target = sqlx::query_as::<_, (String,)>(
         "SELECT role
@@ -465,30 +417,13 @@ async fn remove_member(
         return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
     }
 
-    let caller = sqlx::query_as::<_, (String,)>(
-        "SELECT role
-         FROM team_memberships
-         WHERE team_id = $1 AND user_id = $2
-         FOR UPDATE",
+    require_admin(
+        &mut *transaction,
+        team_id,
+        user.id,
+        "Only team admins can remove members",
     )
-    .bind(team_id)
-    .bind(user.id)
-    .fetch_optional(&mut *transaction)
-    .await
-    .map_err(remove_member_error)?;
-
-    match caller {
-        Some((role,)) if role == "admin" => {}
-        Some(_) => {
-            return Err(api_error(
-                StatusCode::FORBIDDEN,
-                "Only team admins can remove members",
-            ));
-        }
-        None => {
-            return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
-        }
-    }
+    .await?;
 
     let target = sqlx::query_as::<_, (String,)>(
         "SELECT role
