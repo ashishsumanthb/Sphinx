@@ -91,12 +91,25 @@ async fn postgres_edge_case_matrix() {
     sqlx::query("UPDATE quizzes SET starts_at=clock_timestamp(), ends_at=clock_timestamp()+interval '5 minutes' WHERE id=$1")
         .bind(base.quiz).execute(&pool).await.unwrap();
 
+    let late_session = repo.start_session(base.quiz, base.other).await.unwrap();
+    sqlx::query("UPDATE quizzes SET ends_at=clock_timestamp() WHERE id=$1")
+        .bind(base.quiz).execute(&pool).await.unwrap();
+    let late_answers = vec![AnswerInput { question_id: base.question, selected_option_index: 1 }];
+    assert_eq!(
+        repo.submit(late_session.session_id, base.other, &late_answers)
+            .await.unwrap_err().code(),
+        "QUIZ_NOT_AVAILABLE"
+    );
+    sqlx::query("UPDATE quizzes SET ends_at=clock_timestamp()+interval '5 minutes' WHERE id=$1")
+        .bind(base.quiz).execute(&pool).await.unwrap();
+
     // Concurrent starts resolve to one active session.
     let (left, right) = tokio::join!(repo.start_session(base.quiz, base.member), repo.start_session(base.quiz, base.member));
     let left = left.unwrap();
     let right = right.unwrap();
     assert_eq!(left.session_id, right.session_id);
-    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM attempt_sessions").fetch_one(&pool).await.unwrap(), 1);
+    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM attempt_sessions WHERE user_id=$1")
+        .bind(base.member).fetch_one(&pool).await.unwrap(), 1);
 
     let answers = vec![AnswerInput { question_id: base.question, selected_option_index: 1 }];
     // Concurrent identical submits create one attempt and return one replay.
