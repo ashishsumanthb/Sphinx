@@ -1,6 +1,9 @@
 use axum::{
     Json, Router,
-    extract::{State, rejection::JsonRejection},
+    extract::{
+        Path, State,
+        rejection::{JsonRejection, PathRejection},
+    },
     http::StatusCode,
     routing::post,
 };
@@ -25,8 +28,23 @@ struct TeamResponse {
     role: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AddMemberRequest {
+    user_id: Uuid,
+}
+
+#[derive(Serialize)]
+struct MemberResponse {
+    team_id: Uuid,
+    user_id: Uuid,
+    role: String,
+}
+
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/", post(create_team).get(list_teams))
+    Router::new()
+        .route("/", post(create_team).get(list_teams))
+        .route("/{team_id}/members", post(add_member))
 }
 
 async fn create_team(
@@ -87,6 +105,7 @@ async fn create_team(
         }),
     ))
 }
+
 async fn list_teams(
     State(state): State<AppState>,
     user: AuthUser,
@@ -112,6 +131,113 @@ async fn list_teams(
     Ok(Json(teams))
 }
 
+async fn add_member(
+    State(state): State<AppState>,
+    user: AuthUser,
+    path: Result<Path<Uuid>, PathRejection>,
+    payload: Result<Json<AddMemberRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<MemberResponse>), ApiError> {
+    let Path(team_id) =
+        path.map_err(|_| api_error(StatusCode::BAD_REQUEST, "Team ID must be a valid UUID"))?;
+
+    let Json(request) = payload
+        .map_err(|error| api_error(error.status(), "Expected JSON with a valid user_id UUID"))?;
+
+    let mut transaction = state.pool.begin().await.map_err(member_error)?;
+
+    // Lock the team first in every membership-changing handler.
+    let team = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT id
+         FROM teams
+         WHERE id = $1
+         FOR UPDATE",
+    )
+    .bind(team_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(member_error)?;
+
+    if team.is_none() {
+        return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
+    }
+
+    let membership = sqlx::query_as::<_, (String,)>(
+        "SELECT role
+         FROM team_memberships
+         WHERE team_id = $1 AND user_id = $2
+         FOR UPDATE",
+    )
+    .bind(team_id)
+    .bind(user.id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(member_error)?;
+
+    match membership {
+        Some((role,)) if role == "admin" => {}
+        Some(_) => {
+            return Err(api_error(
+                StatusCode::FORBIDDEN,
+                "Only team admins can add members",
+            ));
+        }
+        None => {
+            return Err(api_error(StatusCode::NOT_FOUND, "Team not found"));
+        }
+    }
+
+    let target_user = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT id
+         FROM users
+         WHERE id = $1
+         FOR KEY SHARE",
+    )
+    .bind(request.user_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(member_error)?;
+
+    if target_user.is_none() {
+        return Err(api_error(StatusCode::NOT_FOUND, "User not found"));
+    }
+
+    let inserted = sqlx::query(
+        "INSERT INTO team_memberships (team_id, user_id, role)
+         VALUES ($1, $2, 'member')
+         ON CONFLICT (team_id, user_id) DO NOTHING",
+    )
+    .bind(team_id)
+    .bind(request.user_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(member_error)?;
+
+    if inserted.rows_affected() == 0 {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            "User is already a team member",
+        ));
+    }
+
+    transaction.commit().await.map_err(member_error)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(MemberResponse {
+            team_id,
+            user_id: request.user_id,
+            role: "member".to_owned(),
+        }),
+    ))
+}
+
 fn team_error(_error: sqlx::Error) -> ApiError {
     api_error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to create team")
+}
+
+fn member_error(_error: sqlx::Error) -> ApiError {
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to add team member",
+    )
 }
