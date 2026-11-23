@@ -4,7 +4,7 @@ use crate::{
     auth::{ApiError, AuthUser, api_error},
     domain::quiz::{Quiz, QuizRevision, QuizStatus},
     permissions::require_admin,
-    services::quiz_service::{DraftItem, open_quiz},
+    services::quiz_service::{DraftItem, close_quiz, open_quiz},
 };
 use axum::{
     Json, Router,
@@ -46,6 +46,12 @@ struct PublishedQuiz {
     ends_at: DateTime<Utc>,
     eligible_users: u64,
 }
+#[derive(Serialize)]
+struct ClosedQuiz {
+    quiz_id: Uuid,
+    status: String,
+    manually_closed_at: DateTime<Utc>,
+}
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/teams/{team_id}/quizzes", post(create_quiz))
@@ -58,6 +64,10 @@ pub(crate) fn routes() -> Router<AppState> {
             put(edit_question),
         )
         .route("/api/v1/quizzes/{quiz_id}/publish", post(publish_quiz))
+        .route(
+            "/api/v1/quizzes/{quiz_id}/close",
+            post(close_published_quiz),
+        )
 }
 #[derive(Deserialize)]
 struct AddQuestionRequest {
@@ -380,6 +390,132 @@ async fn publish_quiz(
 
 fn publish_db_error(_: sqlx::Error) -> ApiError {
     api_error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to publish quiz")
+}
+async fn close_published_quiz(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(quiz_id): Path<Uuid>,
+) -> Result<Json<ClosedQuiz>, ApiError> {
+    let mut tx = state.pool.begin().await.map_err(close_db_error)?;
+
+    let (
+        team_id,
+        title,
+        status,
+        starts_at,
+        ends_at,
+        existing_manually_closed_at,
+        max_attempts,
+        created_by,
+        description,
+        created_at,
+        database_time,
+    ) = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            String,
+            Option<DateTime<Utc>>,
+            Option<DateTime<Utc>>,
+            Option<DateTime<Utc>>,
+            i16,
+            Uuid,
+            Option<String>,
+            DateTime<Utc>,
+            DateTime<Utc>,
+        ),
+    >(
+        "SELECT team_id,
+                title,
+                status,
+                starts_at,
+                ends_at,
+                manually_closed_at,
+                max_attempts,
+                created_by,
+                description,
+                created_at,
+                clock_timestamp()
+         FROM quizzes
+         WHERE id = $1
+         FOR UPDATE",
+    )
+    .bind(quiz_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(close_db_error)?
+    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Quiz not found"))?;
+
+    require_admin(
+        &mut tx,
+        team_id,
+        user.id,
+        "Only a team admin can close a quiz",
+    )
+    .await?;
+
+    let domain_status = match status.as_str() {
+        "draft" => QuizStatus::Draft,
+        "open" => QuizStatus::Open,
+        "closed" => QuizStatus::Closed,
+        _ => {
+            return Err(api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Quiz has an invalid status",
+            ));
+        }
+    };
+
+    let max_attempts = u8::try_from(max_attempts).map_err(|_| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Quiz has an invalid attempt limit",
+        )
+    })?;
+
+    let mut quiz = Quiz {
+        id: quiz_id,
+        team_id,
+        title,
+        status: domain_status,
+        starts_at: starts_at.map(|value| value.timestamp()),
+        ends_at: ends_at.map(|value| value.timestamp()),
+        manually_closed_at: existing_manually_closed_at.map(|value| value.timestamp()),
+        max_attempts,
+        created_by,
+        description,
+        created_at: created_at.timestamp(),
+    };
+
+    close_quiz(&mut quiz, database_time.timestamp())
+        .map_err(|message| api_error(StatusCode::CONFLICT, message))?;
+
+    let manually_closed_at = existing_manually_closed_at.unwrap_or(database_time);
+
+    sqlx::query(
+        "UPDATE quizzes
+         SET status = 'closed',
+             manually_closed_at = COALESCE(manually_closed_at, $2)
+         WHERE id = $1",
+    )
+    .bind(quiz_id)
+    .bind(manually_closed_at)
+    .execute(&mut *tx)
+    .await
+    .map_err(close_db_error)?;
+
+    tx.commit().await.map_err(close_db_error)?;
+
+    Ok(Json(ClosedQuiz {
+        quiz_id,
+        status: String::from("closed"),
+        manually_closed_at,
+    }))
+}
+
+fn close_db_error(_: sqlx::Error) -> ApiError {
+    api_error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to close quiz")
 }
 async fn add_question(
     State(state): State<AppState>,
