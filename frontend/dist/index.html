@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f8f3" />
+    <meta name="description" content="Sphinx — a friendly place to test what you know." />
+    <title>Sphinx — Learn. Play. Grow.</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="story-panel" aria-label="Welcome to Sphinx">
+        <nav class="brand" aria-label="Sphinx home">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="img"><path d="M9.5 7.5h13a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4H17l-5.3 4.1c-.7.5-1.7 0-1.7-.9v-3.2h-.5a4 4 0 0 1-4-4v-7a4 4 0 0 1 4-4Z"/><path class="mark-dot" d="M11.5 14.8h.1m4.4 0h.1m4.4 0h.1"/></svg>
+          </span>
+          <span>sphinx</span>
+        </nav>
+
+        <div class="story-copy">
+          <p class="eyebrow"><span></span> Your daily curiosity workout</p>
+          <h1>Learn something.<br />Prove you <em>know it.</em></h1>
+          <p class="intro">Quick quizzes, real progress, and just enough friendly competition to keep things interesting.</p>
+
+          <div class="proof-row" aria-label="Platform activity">
+            <div class="avatars" aria-hidden="true">
+              <span class="avatar avatar-one">MK</span>
+              <span class="avatar avatar-two">AJ</span>
+              <span class="avatar avatar-three">SL</span>
+              <span class="avatar avatar-four">+</span>
+            </div>
+            <p><strong>12,000+</strong><br />curious minds already playing</p>
+          </div>
+        </div>
+
+        <div class="quiz-card quiz-card-top" aria-hidden="true">
+          <span class="card-icon">✦</span>
+          <div><small>CURRENT STREAK</small><strong>7 days</strong></div>
+          <span class="spark">↗</span>
+        </div>
+        <div class="quiz-card quiz-card-bottom" aria-hidden="true">
+          <small>WEEKLY SCORE</small>
+          <div class="score-line"><strong>860</strong><span>+120</span></div>
+          <div class="score-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+
+        <p class="side-note">Knowledge looks good on you.</p>
+      </section>
+
+      <section class="auth-panel">
+        <div class="mobile-widget mobile-widget-top" aria-hidden="true">
+          <span class="mobile-widget-icon">✦</span>
+          <div><small>DAILY STREAK</small><strong>7 days</strong></div>
+          <span class="mobile-widget-trend">↗</span>
+        </div>
+
+        <div class="mobile-brand brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32"><path d="M9.5 7.5h13a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4H17l-5.3 4.1c-.7.5-1.7 0-1.7-.9v-3.2h-.5a4 4 0 0 1-4-4v-7a4 4 0 0 1 4-4Z"/><path class="mark-dot" d="M11.5 14.8h.1m4.4 0h.1m4.4 0h.1"/></svg>
+          </span>
+          <span>sphinx</span>
+        </div>
+
+        <div class="auth-wrap">
+          <div class="auth-heading">
+            <span class="kicker">WELCOME BACK</span>
+            <h2>Pick up where<br />you left off.</h2>
+            <p>New to Sphinx? <button class="text-link" type="button" data-switch="signup">Create an account</button></p>
+          </div>
+
+          <form id="auth-form" novalidate>
+            <div class="name-grid is-hidden" id="name-fields">
+              <label class="field">
+                <span>First name</span>
+                <input id="first-name" name="firstName" type="text" autocomplete="given-name" placeholder="Maya" />
+                <small class="error-message"></small>
+              </label>
+              <label class="field">
+                <span>Last name</span>
+                <input id="last-name" name="lastName" type="text" autocomplete="family-name" placeholder="Kapoor" />
+                <small class="error-message"></small>
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Email address</span>
+              <div class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16v11H4z"/><path d="m4.5 7 7.5 6 7.5-6"/></svg>
+                <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+              </div>
+              <small class="error-message"></small>
+            </label>
+
+            <label class="field">
+              <span>Password</span>
+              <div class="input-wrap">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required />
+                <button class="icon-button" type="button" data-password-toggle aria-label="Show password">
+                  <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.7"/></svg>
+                </button>
+              </div>
+              <small class="password-hint">Use at least 8 characters</small>
+              <small class="error-message"></small>
+            </label>
+
+            <div class="form-options">
+              <label class="check"><input type="checkbox" name="remember" /><span aria-hidden="true"></span>Remember me</label>
+              <button type="button" class="text-link forgot-link">Forgot password?</button>
+            </div>
+
+            <label class="terms check is-hidden" id="terms-row">
+              <input type="checkbox" name="terms" />
+              <span aria-hidden="true"></span>
+              I agree to the <a href="#">Terms</a> and <a href="#">Privacy Policy</a>
+            </label>
+
+            <button class="primary-button" type="submit"><span>Log in to Sphinx</span><b aria-hidden="true">→</b></button>
+
+            <div class="divider"><span>or continue with</span></div>
+
+            <div class="social-grid">
+              <button class="social-button" type="button" data-provider="Google" aria-label="Continue with Google">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.6h3.3c1.9-1.8 2.9-4.4 2.9-7.5Z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.3l-3.3-2.6c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3v2.7A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.4 14a6 6 0 0 1 0-3.9V7.4H3A10 10 0 0 0 3 16.7L6.4 14Z"/><path fill="#EA4335" d="M12 6c1.5 0 2.8.5 3.8 1.5l2.9-2.8A9.7 9.7 0 0 0 3 7.4l3.4 2.7C7.2 7.7 9.4 6 12 6Z"/></svg>
+                Google
+              </button>
+              <button class="social-button" type="button" data-provider="Apple" aria-label="Continue with Apple">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.1 12.6c0-2 1.7-3 1.8-3.1a4 4 0 0 0-3.2-1.7c-1.4-.1-2.7.8-3.4.8-.7 0-1.8-.8-3-.8a4.4 4.4 0 0 0-3.7 2.2c-1.6 2.7-.4 6.8 1.1 9 .8 1.1 1.7 2.3 2.9 2.2 1.2 0 1.6-.7 3.1-.7s1.9.7 3.1.7c1.3 0 2.1-1.1 2.8-2.2a10 10 0 0 0 1.3-2.7 4 4 0 0 1-2.8-3.7ZM14.8 6.4a4 4 0 0 0 1-2.9 4 4 0 0 0-2.7 1.4A3.8 3.8 0 0 0 12 7.7c1 .1 2-.5 2.8-1.3Z"/></svg>
+                Apple
+              </button>
+            </div>
+          </form>
+
+          <div class="success-state" id="success-state" aria-live="polite">
+            <div class="success-icon">✓</div>
+            <span class="kicker">YOU'RE ALL SET</span>
+            <h2>Nice to see you.</h2>
+            <p>This frontend is ready. Connect the form to your authentication API when your backend is set up.</p>
+            <button class="secondary-button" type="button" id="reset-demo">Back to login</button>
+          </div>
+        </div>
+
+        <div class="mobile-widget mobile-widget-bottom" aria-hidden="true">
+          <div class="mini-score-copy"><small>THIS WEEK</small><strong>860 XP</strong></div>
+          <div class="mini-bars"><i></i><i></i><i></i><i></i><i></i></div>
+          <span class="mobile-widget-badge">+14%</span>
+        </div>
+
+        <p class="auth-footer">By continuing, you agree to play fair and stay curious.</p>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>
