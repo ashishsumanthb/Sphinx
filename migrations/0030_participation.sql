@@ -27,11 +27,12 @@ CREATE TABLE quiz_attempts (
     quiz_id UUID NOT NULL REFERENCES quizzes(id),
     user_id UUID NOT NULL REFERENCES users(id),
     quiz_revision_id UUID NOT NULL,
+    attempt_no SMALLINT NOT NULL CHECK (attempt_no IN (1, 2)),
     request_hash CHAR(64) NOT NULL,
     score INT NOT NULL CHECK (score >= 0),
     total_questions INT NOT NULL CHECK (total_questions BETWEEN 1 AND 50),
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    UNIQUE (quiz_id, user_id),
+    UNIQUE (quiz_id, user_id, attempt_no),
     UNIQUE (id, quiz_revision_id),
     FOREIGN KEY (quiz_id, quiz_revision_id)
         REFERENCES quiz_revisions(quiz_id, id),

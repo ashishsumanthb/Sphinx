@@ -31,6 +31,9 @@ pub struct AttemptSessionResponse {
     pub quiz_revision_id: Uuid,
     pub started_at: DateTime<Utc>,
     pub deadline: DateTime<Utc>,
+    pub attempt_number: u8,
+    pub max_attempts: u8,
+    pub remaining_attempts: u8,
     pub questions: Vec<PublicQuestionResponse>,
 }
 
@@ -51,6 +54,9 @@ pub struct AnswerInput {
 pub struct SubmitAttemptResponse {
     pub attempt_id: Uuid,
     pub quiz_id: Uuid,
+    pub attempt_number: u8,
+    pub max_attempts: u8,
+    pub remaining_attempts: u8,
     pub score: u32,
     pub total_questions: u32,
     pub percentage: f64,
@@ -62,6 +68,7 @@ pub struct SubmitAttemptResponse {
 pub struct MyAttemptResponse {
     pub attempt_id: Uuid,
     pub quiz_id: Uuid,
+    pub attempt_number: u8,
     pub score: u32,
     pub total_questions: u32,
     pub percentage: f64,
