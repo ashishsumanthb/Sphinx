@@ -13,6 +13,9 @@ middleware to insert `AuthenticatedUser` into the request extensions.
 | `GET` | `/api/v1/attempt-sessions/{session_id}/questions` | Owner-only questions without answers or explanations |
 | `POST` | `/api/v1/attempt-sessions/{session_id}/submit` | Validates, scores, and atomically saves one attempt |
 | `GET` | `/api/v1/quizzes/{quiz_id}/my-attempts` | Returns only the authenticated user's attempt |
+| `GET` | `/api/v1/attempts/{attempt_id}/review` | Owner or team-admin post-submit answer review |
+| `GET` | `/api/v1/quizzes/{quiz_id}/my-results` | Own best result and revision-specific rank |
+| `GET` | `/api/v1/quizzes/{quiz_id}/analytics` | Team-admin participation, averages, and rankings |
 
 ## Submission
 
@@ -51,12 +54,42 @@ retry for the same session with different answers returns
 
 Pre-submission responses contain only `question_id`, `position`,
 `question_text`, and `options`. They never serialize `correct_option_index`,
-`is_correct`, or `explanation`. Closed-quiz review and analytics belong to
-Member 4.
+`is_correct`, or `explanation`. Correct answers and explanations appear only in
+the submitted attempt owner's review or to an administrator of that quiz's
+team. Member result endpoints take identity exclusively from authentication and
+never accept a user ID.
+
+Requests are limited to 1 MiB. Oversized requests return the standard
+`PAYLOAD_TOO_LARGE` error envelope.
+
+## Verification
+
+```bash
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
+```
+
+Run the PostgreSQL timing, concurrency, rollback, retry, authorization,
+constraint, analytics, and dependency-failure matrix against an isolated test
+database:
+
+```bash
+docker run --name sphinx-edge-postgres \
+  -e POSTGRES_PASSWORD=edgepass -e POSTGRES_DB=sphinx_edge \
+  -p 127.0.0.1:55432:5432 -d postgres:17-alpine
+
+TEST_DATABASE_URL=postgres://postgres:edgepass@127.0.0.1:55432/sphinx_edge \
+  cargo test --test postgres_edge_cases -- --ignored --nocapture
+
+docker rm -f sphinx-edge-postgres
+```
+
+The test resets the `public` schema and must never target a development or
+production database.
 
 ## Integration dependencies
 
-- Member 1: `users`, `team_members`, and authenticated-user middleware.
+- Member 1: `users`, `team_memberships`, and authenticated-user middleware.
 - Member 2: `quizzes`, `quiz_revisions`, `question_versions`, and the
   `quiz_eligibilities` snapshot.
 - Member 4: reads committed attempts; it must not recompute saved scores.

@@ -4,7 +4,8 @@ use crate::{
     api::{
         dto::{
             AnswerInput, AttemptSessionResponse, AvailableQuizResponse, MyAttemptResponse,
-            PublicQuestionResponse, SubmitAttemptResponse,
+            AttemptReviewResponse, MyResultsResponse, PublicQuestionResponse,
+            QuizAnalyticsResponse, SubmitAttemptResponse,
         },
         error::AppError,
     },
@@ -60,5 +61,29 @@ impl ParticipationService {
         user_id: Uuid,
     ) -> Result<Vec<MyAttemptResponse>, AppError> {
         self.repository.my_attempts(quiz_id, user_id).await
+    }
+
+    pub async fn attempt_review(
+        &self,
+        attempt_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<AttemptReviewResponse, AppError> {
+        self.repository.attempt_review(attempt_id, user_id).await
+    }
+
+    pub async fn my_results(
+        &self,
+        quiz_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<MyResultsResponse, AppError> {
+        self.repository.my_results(quiz_id, user_id).await
+    }
+
+    pub async fn quiz_analytics(
+        &self,
+        quiz_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<QuizAnalyticsResponse, AppError> {
+        self.repository.quiz_analytics(quiz_id, user_id).await
     }
 }

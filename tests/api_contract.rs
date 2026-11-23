@@ -23,7 +23,6 @@ fn public_question_never_serializes_protected_answer_fields() {
     assert!(json.get("explanation").is_none());
     assert!(json.get("is_correct").is_none());
 }
-
 #[tokio::test]
 async fn participation_routes_require_authentication() {
     let pool = PgPoolOptions::new()
@@ -43,4 +42,24 @@ async fn participation_routes_require_authentication() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn review_results_and_analytics_require_authentication() {
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@127.0.0.1/unused")
+        .unwrap();
+    let id = Uuid::new_v4();
+    for uri in [
+        format!("/api/v1/attempts/{id}/review"),
+        format!("/api/v1/quizzes/{id}/my-results"),
+        format!("/api/v1/quizzes/{id}/analytics"),
+    ] {
+        let app = participation_routes().with_state(AppState { pool: pool.clone() });
+        let response = app
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
 }
