@@ -4,7 +4,9 @@ use crate::{
     auth::{ApiError, AuthUser, api_error},
     domain::quiz::{Quiz, QuizRevision, QuizStatus},
     permissions::require_admin,
-    services::quiz_service::{DraftItem, close_quiz, open_quiz},
+    services::quiz_service::{
+        DraftItem, Snapshot, VersionedItem, close_quiz, open_quiz, revise_question,
+    },
 };
 use axum::{
     Json, Router,
@@ -77,15 +79,29 @@ struct AddQuestionRequest {
     explanation: String,
 }
 
+#[derive(Deserialize)]
+struct EditQuestionRequest {
+    #[serde(flatten)]
+    question: QuestionDraft,
+    #[serde(default)]
+    explanation: String,
+    change_reason: Option<String>,
+}
+
 #[derive(Serialize)]
 struct AddedQuestion {
     stable_question_id: Uuid,
     position: i32,
 }
+
 #[derive(Serialize)]
 struct UpdatedQuestion {
     stable_question_id: Uuid,
     position: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quiz_revision_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revision_no: Option<i32>,
 }
 async fn publish_quiz(
     State(state): State<AppState>,
@@ -602,7 +618,7 @@ async fn edit_question(
     State(state): State<AppState>,
     user: AuthUser,
     Path((team_id, quiz_id, question_id)): Path<(Uuid, Uuid, Uuid)>,
-    Json(request): Json<AddQuestionRequest>,
+    Json(request): Json<EditQuestionRequest>,
 ) -> Result<Json<UpdatedQuestion>, ApiError> {
     let mut tx = state.pool.begin().await.map_err(edit_question_db_error)?;
 
@@ -614,8 +630,9 @@ async fn edit_question(
     )
     .await?;
 
-    let status = sqlx::query_scalar::<_, String>(
-        "SELECT status FROM quizzes
+    let (status, database_time) = sqlx::query_as::<_, (String, DateTime<Utc>)>(
+        "SELECT status, clock_timestamp()
+         FROM quizzes
          WHERE id = $1 AND team_id = $2
          FOR UPDATE",
     )
@@ -626,46 +643,292 @@ async fn edit_question(
     .map_err(edit_question_db_error)?
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Quiz not found"))?;
 
-    if status != "draft" {
-        return Err(api_error(
-            StatusCode::CONFLICT,
-            "Only questions in a draft quiz can be edited",
-        ));
-    }
+    let EditQuestionRequest {
+        question,
+        explanation,
+        change_reason,
+    } = request;
 
-    let question = request.question;
     validate_question(&question)
         .map_err(|message| api_error(StatusCode::UNPROCESSABLE_ENTITY, message))?;
 
-    let position = sqlx::query_scalar::<_, i32>(
+    if status == "draft" {
+        let position = sqlx::query_scalar::<_, i32>(
+            "UPDATE draft_questions
+             SET question_text = $1,
+                 options = $2,
+                 correct_option_index = $3,
+                 explanation = $4
+             WHERE quiz_id = $5
+               AND stable_question_id = $6
+             RETURNING position",
+        )
+        .bind(question.question_text)
+        .bind(sqlx::types::Json(question.options))
+        .bind(question.correct_option_index as i32)
+        .bind(explanation)
+        .bind(quiz_id)
+        .bind(question_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(edit_question_db_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Question not found"))?;
+
+        tx.commit().await.map_err(edit_question_db_error)?;
+
+        return Ok(Json(UpdatedQuestion {
+            stable_question_id: question_id,
+            position,
+            quiz_revision_id: None,
+            revision_no: None,
+        }));
+    }
+
+    if status != "open" && status != "closed" {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            "Quiz cannot be revised in its current state",
+        ));
+    }
+
+    let change_reason = change_reason.as_deref().unwrap_or("");
+
+    let (
+        previous_revision_id,
+        previous_revision_no,
+        previous_created_by,
+        previous_change_reason,
+        previous_created_at,
+    ) = sqlx::query_as::<_, (Uuid, i32, Uuid, String, DateTime<Utc>)>(
+        "SELECT id, revision_no, created_by, change_reason, created_at
+         FROM quiz_revisions
+         WHERE quiz_id = $1
+         ORDER BY revision_no DESC
+         LIMIT 1",
+    )
+    .bind(quiz_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(edit_question_db_error)?
+    .ok_or_else(|| api_error(StatusCode::CONFLICT, "Quiz has no published revision"))?;
+
+    let version_rows = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            Uuid,
+            i32,
+            String,
+            sqlx::types::Json<Vec<String>>,
+            i32,
+            String,
+        ),
+    >(
+        "SELECT id,
+                stable_question_id,
+                position,
+                question_text,
+                options,
+                correct_option_index,
+                explanation
+         FROM question_versions
+         WHERE quiz_revision_id = $1
+         ORDER BY position",
+    )
+    .bind(previous_revision_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(edit_question_db_error)?;
+
+    let mut previous_questions = Vec::with_capacity(version_rows.len());
+
+    for (
+        version_id,
+        stable_question_id,
+        position,
+        question_text,
+        options,
+        correct_option_index,
+        explanation,
+    ) in version_rows
+    {
+        let position = usize::try_from(position).map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Question position is out of range",
+            )
+        })?;
+
+        let correct_option_index = usize::try_from(correct_option_index).map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Correct answer index is out of range",
+            )
+        })?;
+
+        previous_questions.push(VersionedItem {
+            id: version_id,
+            position,
+            item: DraftItem {
+                stable_id: stable_question_id,
+                question: QuestionDraft {
+                    question_text,
+                    options: options.0,
+                    correct_option_index,
+                },
+                explanation: Some(explanation),
+            },
+        });
+    }
+
+    let previous = Snapshot {
+        revision: QuizRevision {
+            id: previous_revision_id,
+            quiz_id,
+            revision_no: previous_revision_no,
+            created_by: previous_created_by,
+            change_reason: previous_change_reason,
+            created_at: previous_created_at.timestamp(),
+        },
+        questions: previous_questions,
+    };
+
+    let revised = revise_question(
+        &previous,
+        question_id,
+        question,
+        Some(explanation),
+        user.id,
+        database_time.timestamp(),
+        change_reason,
+    )
+    .map_err(|message| api_error(StatusCode::UNPROCESSABLE_ENTITY, message))?;
+
+    sqlx::query(
+        "INSERT INTO quiz_revisions
+            (id, quiz_id, revision_no, created_by, change_reason, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(revised.revision.id)
+    .bind(revised.revision.quiz_id)
+    .bind(revised.revision.revision_no)
+    .bind(revised.revision.created_by)
+    .bind(revised.revision.change_reason.as_str())
+    .bind(database_time)
+    .execute(&mut *tx)
+    .await
+    .map_err(edit_question_db_error)?;
+
+    for version in &revised.questions {
+        let position = i32::try_from(version.position).map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Question position is out of range",
+            )
+        })?;
+
+        let correct_option_index = i32::try_from(version.item.question.correct_option_index)
+            .map_err(|_| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Correct answer index is out of range",
+                )
+            })?;
+
+        sqlx::query(
+            "INSERT INTO question_versions
+                (id,
+                 quiz_revision_id,
+                 stable_question_id,
+                 position,
+                 question_text,
+                 options,
+                 correct_option_index,
+                 explanation)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(version.id)
+        .bind(revised.revision.id)
+        .bind(version.item.stable_id)
+        .bind(position)
+        .bind(version.item.question.question_text.as_str())
+        .bind(sqlx::types::Json(version.item.question.options.clone()))
+        .bind(correct_option_index)
+        .bind(version.item.explanation.clone().unwrap_or_default())
+        .execute(&mut *tx)
+        .await
+        .map_err(edit_question_db_error)?;
+    }
+
+    let revised_question = revised
+        .questions
+        .iter()
+        .find(|version| version.item.stable_id == question_id)
+        .ok_or_else(|| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Revised question was not created",
+            )
+        })?;
+
+    let position = i32::try_from(revised_question.position).map_err(|_| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Question position is out of range",
+        )
+    })?;
+
+    let correct_option_index = i32::try_from(revised_question.item.question.correct_option_index)
+        .map_err(|_| {
+        api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Correct answer index is out of range",
+        )
+    })?;
+
+    let updated = sqlx::query(
         "UPDATE draft_questions
          SET question_text = $1,
              options = $2,
              correct_option_index = $3,
              explanation = $4
          WHERE quiz_id = $5
-           AND stable_question_id = $6
-         RETURNING position",
+           AND stable_question_id = $6",
     )
-    .bind(question.question_text)
-    .bind(sqlx::types::Json(question.options))
-    .bind(question.correct_option_index as i32)
-    .bind(request.explanation)
+    .bind(revised_question.item.question.question_text.as_str())
+    .bind(sqlx::types::Json(
+        revised_question.item.question.options.clone(),
+    ))
+    .bind(correct_option_index)
+    .bind(
+        revised_question
+            .item
+            .explanation
+            .clone()
+            .unwrap_or_default(),
+    )
     .bind(quiz_id)
     .bind(question_id)
-    .fetch_optional(&mut *tx)
+    .execute(&mut *tx)
     .await
-    .map_err(edit_question_db_error)?
-    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Question not found"))?;
+    .map_err(edit_question_db_error)?;
+
+    if updated.rows_affected() != 1 {
+        return Err(api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Published question is missing from the draft",
+        ));
+    }
 
     tx.commit().await.map_err(edit_question_db_error)?;
 
     Ok(Json(UpdatedQuestion {
         stable_question_id: question_id,
         position,
+        quiz_revision_id: Some(revised.revision.id),
+        revision_no: Some(revised.revision.revision_no),
     }))
 }
-
 fn edit_question_db_error(_: sqlx::Error) -> ApiError {
     api_error(StatusCode::INTERNAL_SERVER_ERROR, "Unable to edit question")
 }
