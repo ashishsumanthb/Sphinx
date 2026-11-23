@@ -713,21 +713,22 @@ document.querySelector('#start-demo-quiz').addEventListener('click', async (even
 
 document.querySelector('#quiz-player').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const player = event.currentTarget;
   const answers = activeAttempt.questions.map((question) => {
-    const selected = event.currentTarget.querySelector(`input[name="answer-${question.question_id}"]:checked`);
+    const selected = player.querySelector(`input[name="answer-${question.question_id}"]:checked`);
     return selected ? { question_id: question.question_id, selected_option_index: Number(selected.value) } : null;
   });
   if (answers.some((answer) => answer === null)) {
     showToast('Answer every question before submitting.');
     return;
   }
-  const button = event.currentTarget.querySelector('button[type="submit"]');
+  const button = player.querySelector('button[type="submit"]');
   button.disabled = true;
   try {
     const result = await apiRequest(`/api/v1/attempt-sessions/${activeAttempt.session_id}/submit`, {
       method: 'POST', token: session.token, body: { answers }
     });
-    event.currentTarget.classList.add('is-hidden');
+    player.classList.add('is-hidden');
     const summary = document.querySelector('#submission-result');
     summary.textContent = `Submitted successfully: ${result.score}/${result.total_questions} (${formatPercentage(result.percentage)}). ${result.remaining_attempts} attempt(s) remaining.`;
     summary.classList.remove('is-hidden');
