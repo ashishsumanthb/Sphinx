@@ -1,4 +1,4 @@
-#[derive(Clone,serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub(crate) struct QuestionDraft {
     pub(crate) question_text: String,
     pub(crate) options: Vec<String>,
@@ -27,35 +27,6 @@ pub(crate) fn validate_question(question: &QuestionDraft) -> Result<(), &'static
 
     Ok(())
 }
-
-fn main() {
-    let question = String::from("   ");
-    let options = vec![
-        String::from("200 OK"),
-        String::from("201 Created"),
-        String::from("404 Not Found"),
-    ];
-
-    let draft = QuestionDraft {
-        question_text: question,
-        options: options,
-        correct_option_index: 1,
-    };
-
-    let result = validate_question(&draft);
-
-    match result {
-        Ok(()) => {
-            println!("Question is valid");
-            println!("Question: {}", draft.question_text);
-            println!(
-                "Correct answer: {}",
-                draft.options[draft.correct_option_index]
-            );
-        }
-        Err(message) => println!("Invalid question: {}", message),
-    }
-}
 #[cfg(test)]
 pub(super) fn blank_question() -> QuestionDraft {
     QuestionDraft {
@@ -79,10 +50,7 @@ mod tests {
     fn rejects_blank_question_text() {
         let draft = QuestionDraft {
             question_text: String::from("   "),
-            options: vec![
-                String::from("200 OK"),
-                String::from("201 Created"),
-            ],
+            options: vec![String::from("200 OK"), String::from("201 Created")],
             correct_option_index: 1,
         };
 
@@ -96,10 +64,7 @@ mod tests {
     fn accepts_valid_question() {
         let draft = QuestionDraft {
             question_text: String::from("Which HTTP status means Created?"),
-            options: vec![
-                String::from("200 OK"),
-                String::from("201 Created"),
-            ],
+            options: vec![String::from("200 OK"), String::from("201 Created")],
             correct_option_index: 1,
         };
 
@@ -164,10 +129,7 @@ mod tests {
     fn rejects_blank_option() {
         let draft = QuestionDraft {
             question_text: String::from("Which HTTP status means Created?"),
-            options: vec![
-                String::from("201 Created"),
-                String::from("   "),
-            ],
+            options: vec![String::from("201 Created"), String::from("   ")],
             correct_option_index: 0,
         };
 
@@ -181,10 +143,7 @@ mod tests {
     fn rejects_invalid_answer_index() {
         let draft = QuestionDraft {
             question_text: String::from("Which HTTP status means Created?"),
-            options: vec![
-                String::from("200 OK"),
-                String::from("201 Created"),
-            ],
+            options: vec![String::from("200 OK"), String::from("201 Created")],
             correct_option_index: 2,
         };
 

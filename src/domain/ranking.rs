@@ -11,13 +11,12 @@ pub(crate) fn competition_rank(score: usize, best_scores: &[usize]) -> usize {
 
     rank
 }
-pub(crate) fn best_scores_for_revision(attempts:&[(Uuid,usize)])->HashMap<Uuid,usize>{
+pub(crate) fn best_scores_for_revision(attempts: &[(Uuid, usize)]) -> HashMap<Uuid, usize> {
     let mut best_scores = HashMap::new();
 
-
-    for &(participant_id,score) in attempts{
+    for &(participant_id, score) in attempts {
         let best = best_scores.entry(participant_id).or_insert(score);
-        if score > *best{
+        if score > *best {
             *best = score;
         }
     }

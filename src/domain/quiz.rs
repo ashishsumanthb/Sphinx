@@ -1,5 +1,5 @@
 #[derive(serde::Serialize)]
-pub(crate) struct  PublicQuestion{
+pub(crate) struct PublicQuestion {
     pub(crate) id: uuid::Uuid,
     pub(crate) position: usize,
     pub(crate) text: String,
@@ -11,43 +11,38 @@ pub(crate) enum QuizStatus {
     Draft,
     Open,
     Closed,
-
 }
 pub(crate) fn is_quiz_open(
-    status:QuizStatus,
-    now:i64,
-    opens_at:i64,
-    closes_at:i64,
+    status: QuizStatus,
+    now: i64,
+    opens_at: i64,
+    closes_at: i64,
     manually_closed_at: Option<i64>,
-)->bool{
+) -> bool {
     status == QuizStatus::Open
         && manually_closed_at.is_none()
         && super::timing::is_within_session_window(now, opens_at, closes_at)
 }
 
-
-pub(crate) fn has_attempt_remaining(completed_attempts: u8, max_attempts:u8)->bool{
+pub(crate) fn has_attempt_remaining(completed_attempts: u8, max_attempts: u8) -> bool {
     completed_attempts < max_attempts
 }
 pub(crate) fn can_start(
-    is_eligible:bool,
-    quiz_is_open:bool,
+    is_eligible: bool,
+    quiz_is_open: bool,
     completed_attempts: u8,
-    max_attempts:u8
-)-> bool{
-    is_eligible
-        && quiz_is_open
-        && has_attempt_remaining(completed_attempts, max_attempts)
+    max_attempts: u8,
+) -> bool {
+    is_eligible && quiz_is_open && has_attempt_remaining(completed_attempts, max_attempts)
 }
 pub(crate) fn can_submit(
-    is_eligible:bool,
-    quiz_is_open:bool,
+    is_eligible: bool,
+    quiz_is_open: bool,
     completed_attempts: u8,
-    max_attempts:u8,
-    has_active_session:bool,
-)->bool{
-    has_active_session
-        && can_start(is_eligible, quiz_is_open, completed_attempts, max_attempts)
+    max_attempts: u8,
+    has_active_session: bool,
+) -> bool {
+    has_active_session && can_start(is_eligible, quiz_is_open, completed_attempts, max_attempts)
 }
 pub(crate) struct QuizRevision {
     pub(crate) id: uuid::Uuid,
@@ -115,40 +110,39 @@ impl Quiz {
     }
 }
 #[cfg(test)]
-mod tests{
-    use super::{can_start,can_submit,has_attempt_remaining};
+mod tests {
+    use super::{can_start, can_submit, has_attempt_remaining};
     #[test]
-    fn enforces_one_attempt_limit(){
-        assert!(has_attempt_remaining(0,1));
-        assert!(!has_attempt_remaining(1,1));
+    fn enforces_one_attempt_limit() {
+        assert!(has_attempt_remaining(0, 1));
+        assert!(!has_attempt_remaining(1, 1));
     }
     #[test]
-    fn enforces_two_attempt_limit(){
-        assert!(has_attempt_remaining(1,2));
-        assert!(!has_attempt_remaining(2,2));
+    fn enforces_two_attempt_limit() {
+        assert!(has_attempt_remaining(1, 2));
+        assert!(!has_attempt_remaining(2, 2));
     }
     #[test]
-    fn starting_requires_eligibility_an_open_quiz_and_an_attempt_left(){
-        assert!(can_start(true,true,1,2));
-        assert!(!can_start(false,true,1,2));
-        assert!(!can_start(true,false,1,2));
-        assert!(!can_start(true,true,2,2));
+    fn starting_requires_eligibility_an_open_quiz_and_an_attempt_left() {
+        assert!(can_start(true, true, 1, 2));
+        assert!(!can_start(false, true, 1, 2));
+        assert!(!can_start(true, false, 1, 2));
+        assert!(!can_start(true, true, 2, 2));
     }
     #[test]
-    fn submission_requires_an_active_session_and_an_open_quiz(){
-        assert!(can_submit(true,true,0,1,true));
-        assert!(!can_submit(true,false,0,1,true));
-        assert!(!can_submit(true,true,0,1,false));
+    fn submission_requires_an_active_session_and_an_open_quiz() {
+        assert!(can_submit(true, true, 0, 1, true));
+        assert!(!can_submit(true, false, 0, 1, true));
+        assert!(!can_submit(true, true, 0, 1, false));
     }
     #[test]
-    fn public_question_serializes_only_participant_fields(){
+    fn public_question_serializes_only_participant_fields() {
         let id = uuid::Uuid::from_u128(1);
-        let question = super::PublicQuestion{
+        let question = super::PublicQuestion {
             id,
-            position:0,
+            position: 0,
             text: String::from("Which HTTP status means Created?"),
-            options:vec![String::from("200 OK"),String::from("201 Created")],
-
+            options: vec![String::from("200 OK"), String::from("201 Created")],
         };
         let actual = serde_json::to_value(&question).unwrap();
         assert_eq!(
@@ -163,7 +157,7 @@ mod tests{
     }
     #[test]
     fn quiz_must_be_open_and_within_its_window() {
-        use super::{is_quiz_open, QuizStatus};
+        use super::{QuizStatus, is_quiz_open};
 
         // The window runs from second 0 up to second 900.
         assert!(is_quiz_open(QuizStatus::Open, 300, 0, 900, None));
@@ -209,7 +203,10 @@ mod tests{
         };
 
         let first_session = AttemptSession::new(
-            Uuid::from_u128(20), Uuid::from_u128(30), &first_revision, 110,
+            Uuid::from_u128(20),
+            Uuid::from_u128(30),
+            &first_revision,
+            110,
         );
 
         let second_revision = QuizRevision {
@@ -222,7 +219,10 @@ mod tests{
         };
 
         let second_session = AttemptSession::new(
-            Uuid::from_u128(21), Uuid::from_u128(31), &second_revision, 130,
+            Uuid::from_u128(21),
+            Uuid::from_u128(31),
+            &second_revision,
+            130,
         );
 
         assert_eq!(first_session.status, SessionStatus::InProgress);

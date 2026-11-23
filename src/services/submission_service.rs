@@ -1,4 +1,4 @@
-use crate::domain::quiz::{can_start, AttemptSession, Quiz, QuizRevision, SessionStatus};
+use crate::domain::quiz::{AttemptSession, Quiz, QuizRevision, SessionStatus, can_start};
 use uuid::Uuid;
 
 pub(crate) fn start_or_resume(
@@ -25,7 +25,12 @@ pub(crate) fn start_or_resume(
         return Ok(session.id);
     }
 
-    if !can_start(is_eligible, quiz_is_open, completed_attempts, quiz.max_attempts) {
+    if !can_start(
+        is_eligible,
+        quiz_is_open,
+        completed_attempts,
+        quiz.max_attempts,
+    ) {
         return Err("Cannot start this quiz session");
     }
 
@@ -40,7 +45,7 @@ pub(crate) fn start_or_resume(
 
 use crate::domain::answer_validation::AnswerInput;
 use crate::domain::quiz::can_submit;
-use crate::domain::scoring::{calculate_score, Score, ScoringQuestion};
+use crate::domain::scoring::{Score, ScoringQuestion, calculate_score};
 use crate::services::quiz_service::Snapshot;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -65,9 +70,7 @@ pub(crate) fn submit_answers<'a>(
         return Err("Session does not belong to this participant and quiz");
     }
 
-    if snapshot.revision.id != session.quiz_revision_id
-        || snapshot.revision.quiz_id != quiz.id
-    {
+    if snapshot.revision.id != session.quiz_revision_id || snapshot.revision.quiz_id != quiz.id {
         return Err("Snapshot does not match this session");
     }
 
@@ -98,14 +101,18 @@ pub(crate) fn submit_answers<'a>(
                 return Err("Cannot submit this quiz session");
             }
 
-            let answer_key = snapshot.questions.iter().map(|version| {
-                let question = &version.item.question;
-                let scoring_question = ScoringQuestion {
-                    option_count: question.options.len(),
-                    correct_option_index: question.correct_option_index,
-                };
-                (version.id, scoring_question)
-            }).collect();
+            let answer_key = snapshot
+                .questions
+                .iter()
+                .map(|version| {
+                    let question = &version.item.question;
+                    let scoring_question = ScoringQuestion {
+                        option_count: question.options.len(),
+                        correct_option_index: question.correct_option_index,
+                    };
+                    (version.id, scoring_question)
+                })
+                .collect();
 
             let score = calculate_score(&answer_key, answers)?;
             let saved = entry.insert(SavedSubmission {
@@ -140,7 +147,10 @@ pub(crate) fn questions_for_session(
         let question = &version.item.question;
         questions.push(PublicQuestion {
             id: version.id,
-            position: version.position.try_into().map_err(|_| "Invalid question position")?,
+            position: version
+                .position
+                .try_into()
+                .map_err(|_| "Invalid question position")?,
             text: question.question_text.clone(),
             options: question.options.clone(),
         });
@@ -181,8 +191,16 @@ mod tests {
         };
         let mut sessions = Vec::new();
 
-        let first_id = start_or_resume(&quiz, &first_revision, user_id, true, 0, 1_100, &mut sessions)
-            .expect("the first click should start a session");
+        let first_id = start_or_resume(
+            &quiz,
+            &first_revision,
+            user_id,
+            true,
+            0,
+            1_100,
+            &mut sessions,
+        )
+        .expect("the first click should start a session");
 
         let second_revision = QuizRevision {
             id: Uuid::from_u128(6),
@@ -193,8 +211,16 @@ mod tests {
             created_at: 1_150,
         };
 
-        let resumed_id = start_or_resume(&quiz, &second_revision, user_id, true, 0, 1_200, &mut sessions)
-            .expect("the second click should resume the session");
+        let resumed_id = start_or_resume(
+            &quiz,
+            &second_revision,
+            user_id,
+            true,
+            0,
+            1_200,
+            &mut sessions,
+        )
+        .expect("the second click should resume the session");
 
         assert_eq!(resumed_id, first_id);
         assert_eq!(sessions.len(), 1);
@@ -204,7 +230,7 @@ mod tests {
     #[test]
     fn submission_is_scored_once_and_only_identical_retries_succeed() {
         use crate::domain::question_validation::QuestionDraft;
-        use crate::services::quiz_service::{build_snapshot, DraftItem};
+        use crate::services::quiz_service::{DraftItem, build_snapshot};
 
         let admin_id = Uuid::from_u128(1);
         let user_id = Uuid::from_u128(2);
@@ -254,8 +280,15 @@ mod tests {
                 selected_option_index,
             }];
             submit_answers(
-                &quiz, &snapshot, &mut session, user_id, true,
-                completed_attempts, now, &answers, &mut submissions,
+                &quiz,
+                &snapshot,
+                &mut session,
+                user_id,
+                true,
+                completed_attempts,
+                now,
+                &answers,
+                &mut submissions,
             )
             .map(|score| score.score)
         };
@@ -272,7 +305,7 @@ mod tests {
     }
     #[test]
     fn standings_only_count_scores_from_the_requested_revision() {
-        use crate::services::analytics_service::{participant_standing, Standing};
+        use crate::services::analytics_service::{Standing, participant_standing};
 
         let quiz_id = Uuid::from_u128(1);
         let make_revision = |id, revision_no| QuizRevision {
@@ -314,16 +347,22 @@ mod tests {
 
             let mut session = AttemptSession::new(Uuid::new_v4(), participant, revision, 1_000);
             session.status = SessionStatus::Submitted;
-            submissions.insert(session.id, SavedSubmission {
-                answers: vec![(question_id, selected_index)],
-                score,
-            });
+            submissions.insert(
+                session.id,
+                SavedSubmission {
+                    answers: vec![(question_id, selected_index)],
+                    score,
+                },
+            );
             sessions.push(session);
         }
 
         assert_eq!(
             participant_standing(&first, user_id, &sessions, &submissions),
-            Some(Standing { best_score: 0, rank: 2 })
+            Some(Standing {
+                best_score: 0,
+                rank: 2
+            })
         );
         assert_eq!(
             participant_standing(&first, other_revision_user, &sessions, &submissions),
@@ -372,9 +411,17 @@ mod tests {
         // The participant starts and receives revision 1's question ID.
         let mut sessions = Vec::new();
         let session_id = start_or_resume(
-            &quiz, &first.revision, participant, true, 0, 1_100, &mut sessions,
+            &quiz,
+            &first.revision,
+            participant,
+            true,
+            0,
+            1_100,
+            &mut sessions,
         )?;
-        let session = sessions.iter_mut().find(|s| s.id == session_id)
+        let session = sessions
+            .iter_mut()
+            .find(|s| s.id == session_id)
             .expect("starting the quiz should store the session");
 
         let shown = questions_for_session(session, participant, &first)?;
@@ -385,7 +432,13 @@ mod tests {
         let mut correction = first.questions[0].item.question.clone();
         correction.correct_option_index = 1;
         let second = revise_question(
-            &first, stable_id, correction, None, admin, 1_150, "Fixed the answer key",
+            &first,
+            stable_id,
+            correction,
+            None,
+            admin,
+            1_150,
+            "Fixed the answer key",
         )?;
 
         assert!(questions_for_session(session, admin, &first).is_err());
@@ -398,13 +451,32 @@ mod tests {
         }];
         let mut submissions = HashMap::new();
 
-        assert!(submit_answers(
-            &quiz, &second, session, participant, true, 0, 1_200, &answers, &mut submissions,
-        ).is_err());
+        assert!(
+            submit_answers(
+                &quiz,
+                &second,
+                session,
+                participant,
+                true,
+                0,
+                1_200,
+                &answers,
+                &mut submissions,
+            )
+            .is_err()
+        );
         assert!(submissions.is_empty());
 
         let score = submit_answers(
-            &quiz, &first, session, participant, true, 0, 1_200, &answers, &mut submissions,
+            &quiz,
+            &first,
+            session,
+            participant,
+            true,
+            0,
+            1_200,
+            &answers,
+            &mut submissions,
         )?;
         assert_eq!(score.score, 1);
         assert_eq!(submissions.len(), 1);

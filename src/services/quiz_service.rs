@@ -1,4 +1,4 @@
-use crate::domain::quiz_validation::{validate_quiz, QuizDraft};
+use crate::domain::quiz_validation::{QuizDraft, validate_quiz};
 
 #[derive(Clone)]
 pub(crate) struct DraftItem {
@@ -30,7 +30,10 @@ pub(crate) fn build_snapshot(
         });
     }
 
-    Snapshot { revision, questions }
+    Snapshot {
+        revision,
+        questions,
+    }
 }
 pub(crate) fn prepare_quiz_snapshot(
     revision: crate::domain::quiz::QuizRevision,
@@ -79,7 +82,9 @@ pub(crate) fn revise_question(
     item.question = replacement;
     item.explanation = explanation;
 
-    let revision_no = previous.revision.revision_no
+    let revision_no = previous
+        .revision
+        .revision_no
         .checked_add(1)
         .ok_or("Quiz revision number is out of range")?;
 
@@ -209,8 +214,6 @@ pub(crate) fn prepare_publication(
         .ok_or("Quiz closing time is out of range")
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,7 +258,7 @@ mod tests {
 }
 #[cfg(test)]
 mod snapshot_tests {
-    use super::{build_snapshot, DraftItem};
+    use super::{DraftItem, build_snapshot};
     use crate::domain::question_validation::QuestionDraft;
     use crate::domain::quiz::QuizRevision;
     use uuid::Uuid;
@@ -290,7 +293,6 @@ mod snapshot_tests {
         assert_eq!(saved.stable_id, draft_items[0].stable_id);
         assert_eq!(saved.question.question_text, "Which status means Created?");
         assert_eq!(saved.question.correct_option_index, 1);
-
     }
     #[test]
     fn invalid_edit_preserves_the_draft_question() {
@@ -318,7 +320,10 @@ mod snapshot_tests {
         );
 
         assert_eq!(result, Err("Correct answer index is out of range"));
-        assert_eq!(items[0].question.question_text, "Which status means Created?");
+        assert_eq!(
+            items[0].question.question_text,
+            "Which status means Created?"
+        );
         assert_eq!(items[0].question.correct_option_index, 1);
         assert_eq!(items[0].explanation.as_deref(), Some("201 means Created"));
     }
@@ -496,7 +501,10 @@ mod snapshot_tests {
 
         let result = super::open_quiz(&mut quiz, revision, &[], 1_000, Some(10));
 
-        assert_eq!(result.err(), Some("Quiz must have between 1 and 50 questions"));
+        assert_eq!(
+            result.err(),
+            Some("Quiz must have between 1 and 50 questions")
+        );
         assert!(matches!(quiz.status, QuizStatus::Draft));
         assert_eq!(quiz.starts_at, original_start);
         assert_eq!(quiz.ends_at, original_end);

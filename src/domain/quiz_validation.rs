@@ -1,4 +1,4 @@
-use super::question_validation::{validate_question, QuestionDraft};
+use super::question_validation::{QuestionDraft, validate_question};
 
 pub(crate) struct QuizDraft {
     questions: Vec<QuestionDraft>,
@@ -54,33 +54,29 @@ mod tests {
             max_attempts: 3,
         };
 
-        assert_eq!(
-            validate_quiz(&quiz),
-            Err("Quiz must allow 1 or 2 attempts")
-        );
+        assert_eq!(validate_quiz(&quiz), Err("Quiz must allow 1 or 2 attempts"));
     }
     #[test]
-    fn accepts_quiz_with_two_attempts(){
-        let quiz = QuizDraft{
+    fn accepts_quiz_with_two_attempts() {
+        let quiz = QuizDraft {
             questions: vec![sample_question()],
             max_attempts: 2,
         };
-        assert_eq!(validate_quiz(&quiz),Ok(()));
+        assert_eq!(validate_quiz(&quiz), Ok(()));
     }
     #[test]
-    fn accepts_fifty_questions(){
-        let quiz = QuizDraft{
-            questions:(0..50).map(|_|sample_question()).collect(),
-            max_attempts:1,
+    fn accepts_fifty_questions() {
+        let quiz = QuizDraft {
+            questions: (0..50).map(|_| sample_question()).collect(),
+            max_attempts: 1,
         };
-        assert_eq!(validate_quiz(&quiz),Ok(()));
-
+        assert_eq!(validate_quiz(&quiz), Ok(()));
     }
     #[test]
-    fn rejects_fifty_one_questions(){
-        let quiz = QuizDraft{
-            questions: (0..51).map(|_|sample_question()).collect(),
-            max_attempts:1,
+    fn rejects_fifty_one_questions() {
+        let quiz = QuizDraft {
+            questions: (0..51).map(|_| sample_question()).collect(),
+            max_attempts: 1,
         };
         assert_eq!(
             validate_quiz(&quiz),

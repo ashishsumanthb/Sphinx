@@ -1,24 +1,25 @@
-use std::collections::{HashMap,HashSet};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 #[derive(serde::Deserialize)]
-pub(crate)struct AnswerInput{
-    pub(crate)question_id:Uuid,
-    pub (crate)selected_option_index:usize,
+pub(crate) struct AnswerInput {
+    pub(crate) question_id: Uuid,
+    pub(crate) selected_option_index: usize,
 }
-pub(crate)fn validate_answers(
-    option_counts:&HashMap<Uuid,usize>,
+pub(crate) fn validate_answers(
+    option_counts: &HashMap<Uuid, usize>,
     answers: &[AnswerInput],
-)->Result<(),&'static str>{
+) -> Result<(), &'static str> {
     let mut answered_ids = HashSet::new();
-    for answer in answers{
-        let Some(&option_count) = option_counts.get(&answer.question_id)else{
-            return Err("Question does not belong to this quiz session");        };
-        if !answered_ids.insert(answer.question_id){
+    for answer in answers {
+        let Some(&option_count) = option_counts.get(&answer.question_id) else {
+            return Err("Question does not belong to this quiz session");
+        };
+        if !answered_ids.insert(answer.question_id) {
             return Err("Question was answered more than once");
         }
         validate_selected_option(answer.selected_option_index, option_count)?;
     }
-    if answered_ids.len()!=option_counts.len(){
+    if answered_ids.len() != option_counts.len() {
         return Err("Every question must have an answer");
     }
     Ok(())
@@ -62,8 +63,14 @@ mod tests {
         let option_counts = HashMap::from([(question_a, 2), (question_b, 2)]);
 
         let answers = [
-            AnswerInput { question_id: question_a, selected_option_index: 0 },
-            AnswerInput { question_id: question_a, selected_option_index: 1 },
+            AnswerInput {
+                question_id: question_a,
+                selected_option_index: 0,
+            },
+            AnswerInput {
+                question_id: question_a,
+                selected_option_index: 1,
+            },
         ];
 
         assert_eq!(
@@ -72,11 +79,10 @@ mod tests {
         );
     }
 
-
     fn answer(question_id: Uuid, selected_option_index: usize) -> AnswerInput {
-    AnswerInput {
-        question_id,
-        selected_option_index,
+        AnswerInput {
+            question_id,
+            selected_option_index,
         }
     }
 
