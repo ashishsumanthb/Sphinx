@@ -1,16 +1,3 @@
-mod domain;
-mod services;
-
-use axum::{http::StatusCode, routing::post, Json};
-use domain::question_validation::{validate_question, QuestionDraft};
-
-async fn check_question(Json(draft): Json<QuestionDraft>) -> (StatusCode, &'static str) {
-    match validate_question(&draft) {
-        Ok(()) => (StatusCode::OK, "Question is valid"),
-        Err(message) => (StatusCode::UNPROCESSABLE_ENTITY, message),
-    }
-}
-
 use std::{env, error::Error, time::Duration};
 
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -18,10 +5,10 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    if let Err(error) = dotenvy::dotenv() {
-        if !error.not_found() {
-            return Err(error.into());
-        }
+    if let Err(error) = dotenvy::dotenv()
+        && !error.not_found()
+    {
+        return Err(error.into());
     }
 
     let database_options = PgConnectOptions::new()
@@ -51,8 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Sphinx is listening on http://127.0.0.1:8000");
 
-    let app = sphinx::app(state).route("/questions/validate", post(check_question));
-    axum::serve(listener, app).await?;
+    axum::serve(listener, sphinx::app(state)).await?;
 
     Ok(())
 }
