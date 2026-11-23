@@ -39,17 +39,21 @@ BEGIN
        OR pg_temp.member_quiz_access('00000000-0000-4000-8000-000000000999',a) THEN
         RAISE EXCEPTION 'Member access policy failed';
     END IF;
-    UPDATE team_members SET role = 'admin' WHERE user_id = '00000000-0000-4000-8000-000000000007';
+    UPDATE team_memberships SET role = 'admin' WHERE user_id = '00000000-0000-4000-8000-000000000007';
     IF NOT pg_temp.member_quiz_access(q,'00000000-0000-4000-8000-000000000007') THEN
         RAISE EXCEPTION 'Current team admin should be allowed';
     END IF;
-    DELETE FROM team_members WHERE user_id = c;
+    DELETE FROM team_memberships WHERE user_id = c;
     IF pg_temp.member_quiz_access(q,c) THEN
         RAISE EXCEPTION 'Removed membership should be denied';
     END IF;
-    UPDATE teams SET deleted_at = clock_timestamp();
-    IF pg_temp.member_quiz_access(q,a) THEN
-        RAISE EXCEPTION 'Deleted team should be denied';
+    UPDATE team_memberships
+    SET role = 'member'
+    WHERE team_id = '00000000-0000-4000-8000-000000000010'
+      AND user_id = '00000000-0000-4000-8000-000000000007';
+
+    IF pg_temp.member_quiz_access(q,'00000000-0000-4000-8000-000000000007') THEN
+        RAISE EXCEPTION 'Ineligible member should be denied after admin downgrade';
     END IF;
     RAISE NOTICE 'PASS: actual query files, UUID design schema, best-of-two, ties, revision/quiz isolation, fractions, zero scores, empty results';
 END;
