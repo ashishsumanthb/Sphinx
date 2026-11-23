@@ -10,7 +10,10 @@ use crate::{
 };
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{
+        Path, State,
+        rejection::{JsonRejection, PathRejection},
+    },
     http::StatusCode,
     routing::{post, put},
 };
@@ -103,14 +106,23 @@ struct UpdatedQuestion {
     #[serde(skip_serializing_if = "Option::is_none")]
     revision_no: Option<i32>,
 }
+fn invalid_path(error: PathRejection) -> ApiError {
+    api_error(error.status(), "Path parameters are invalid")
+}
+
+fn invalid_json(error: JsonRejection) -> ApiError {
+    api_error(error.status(), "Request body contains invalid JSON")
+}
 async fn publish_quiz(
     State(state): State<AppState>,
     user: AuthUser,
-    Path(quiz_id): Path<Uuid>,
-    Json(request): Json<PublishQuizRequest>,
+    path: Result<Path<Uuid>, PathRejection>,
+    payload: Result<Json<PublishQuizRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<PublishedQuiz>), ApiError> {
-    let mut tx = state.pool.begin().await.map_err(publish_db_error)?;
+    let Path(quiz_id) = path.map_err(invalid_path)?;
+    let Json(request) = payload.map_err(invalid_json)?;
 
+    let mut tx = state.pool.begin().await.map_err(publish_db_error)?;
     let (
         team_id,
         title,
@@ -410,8 +422,10 @@ fn publish_db_error(_: sqlx::Error) -> ApiError {
 async fn close_published_quiz(
     State(state): State<AppState>,
     user: AuthUser,
-    Path(quiz_id): Path<Uuid>,
+    path: Result<Path<Uuid>, PathRejection>,
 ) -> Result<Json<ClosedQuiz>, ApiError> {
+    let Path(quiz_id) = path.map_err(invalid_path)?;
+
     let mut tx = state.pool.begin().await.map_err(close_db_error)?;
 
     let (
@@ -536,9 +550,12 @@ fn close_db_error(_: sqlx::Error) -> ApiError {
 async fn add_question(
     State(state): State<AppState>,
     user: AuthUser,
-    Path((team_id, quiz_id)): Path<(Uuid, Uuid)>,
-    Json(request): Json<AddQuestionRequest>,
+    path: Result<Path<(Uuid, Uuid)>, PathRejection>,
+    payload: Result<Json<AddQuestionRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<AddedQuestion>), ApiError> {
+    let Path((team_id, quiz_id)) = path.map_err(invalid_path)?;
+    let Json(request) = payload.map_err(invalid_json)?;
+
     let mut tx = state.pool.begin().await.map_err(question_db_error)?;
 
     require_admin(
@@ -617,9 +634,12 @@ async fn add_question(
 async fn edit_question(
     State(state): State<AppState>,
     user: AuthUser,
-    Path((team_id, quiz_id, question_id)): Path<(Uuid, Uuid, Uuid)>,
-    Json(request): Json<EditQuestionRequest>,
+    path: Result<Path<(Uuid, Uuid, Uuid)>, PathRejection>,
+    payload: Result<Json<EditQuestionRequest>, JsonRejection>,
 ) -> Result<Json<UpdatedQuestion>, ApiError> {
+    let Path((team_id, quiz_id, question_id)) = path.map_err(invalid_path)?;
+    let Json(request) = payload.map_err(invalid_json)?;
+
     let mut tx = state.pool.begin().await.map_err(edit_question_db_error)?;
 
     require_admin(
@@ -939,9 +959,12 @@ fn question_db_error(_: sqlx::Error) -> ApiError {
 async fn create_quiz(
     State(state): State<AppState>,
     user: AuthUser,
-    Path(team_id): Path<Uuid>,
-    Json(request): Json<CreateQuizRequest>,
+    path: Result<Path<Uuid>, PathRejection>,
+    payload: Result<Json<CreateQuizRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<CreatedQuiz>), ApiError> {
+    let Path(team_id) = path.map_err(invalid_path)?;
+    let Json(request) = payload.map_err(invalid_json)?;
+
     let title = request.title.trim();
     if !(1..=150).contains(&title.chars().count()) {
         return Err(api_error(

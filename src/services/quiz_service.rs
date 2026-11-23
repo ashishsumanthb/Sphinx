@@ -93,7 +93,8 @@ pub(crate) fn revise_question(
         quiz_id: previous.revision.quiz_id,
         revision_no,
         created_by: changed_by,
-        change_reason: reason.to_owned().into(),
+
+        change_reason: reason.to_owned(),
         created_at: changed_at,
     };
 
@@ -149,6 +150,7 @@ pub(crate) fn open_quiz(
 
     Ok(snapshot)
 }
+#[cfg(test)]
 pub(crate) fn edit_draft_question(
     status: &crate::domain::quiz::QuizStatus,
     draft_items: &mut [DraftItem],
@@ -171,6 +173,7 @@ pub(crate) fn edit_draft_question(
     item.explanation = explanation;
     Ok(())
 }
+#[cfg(test)]
 pub(crate) fn add_draft_question(
     status: &crate::domain::quiz::QuizStatus,
     draft_items: &mut Vec<DraftItem>,

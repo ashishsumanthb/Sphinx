@@ -15,7 +15,7 @@ impl QuizDraft {
 pub(crate) fn validate_quiz(quiz: &QuizDraft) -> Result<(), &'static str> {
     let question_count = quiz.questions.len();
 
-    if question_count < 1 || question_count > 50 {
+    if !(1..=50).contains(&question_count) {
         return Err("Quiz must have between 1 and 50 questions");
     }
 

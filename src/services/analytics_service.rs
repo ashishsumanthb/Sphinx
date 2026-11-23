@@ -22,10 +22,9 @@ pub(crate) fn participant_standing(
         if session.quiz_id == revision.quiz_id
             && session.quiz_revision_id == revision.id
             && matches!(session.status, SessionStatus::Submitted)
+            && let Some(saved) = submissions.get(&session.id)
         {
-            if let Some(saved) = submissions.get(&session.id) {
-                attempts.push((session.user_id, saved.score.score));
-            }
+            attempts.push((session.user_id, saved.score.score));
         }
     }
 

@@ -28,9 +28,7 @@ pub async fn list_available_quizzes(
     auth: AuthenticatedUser,
     Path(team_id): Path<Uuid>,
 ) -> ApiResult<Json<AvailableQuizListResponse>> {
-    let quizzes = service(&state)
-        .list_available(team_id, auth.id)
-        .await?;
+    let quizzes = service(&state).list_available(team_id, auth.id).await?;
     Ok(Json(AvailableQuizListResponse { quizzes }))
 }
 

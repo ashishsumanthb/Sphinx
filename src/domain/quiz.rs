@@ -1,3 +1,4 @@
+#[cfg(test)]
 #[derive(serde::Serialize)]
 pub(crate) struct PublicQuestion {
     pub(crate) id: uuid::Uuid,
@@ -23,10 +24,11 @@ pub(crate) fn is_quiz_open(
         && manually_closed_at.is_none()
         && super::timing::is_within_session_window(now, opens_at, closes_at)
 }
-
+#[cfg(test)]
 pub(crate) fn has_attempt_remaining(completed_attempts: u8, max_attempts: u8) -> bool {
     completed_attempts < max_attempts
 }
+#[cfg(test)]
 pub(crate) fn can_start(
     is_eligible: bool,
     quiz_is_open: bool,
@@ -35,6 +37,7 @@ pub(crate) fn can_start(
 ) -> bool {
     is_eligible && quiz_is_open && has_attempt_remaining(completed_attempts, max_attempts)
 }
+#[cfg(test)]
 pub(crate) fn can_submit(
     is_eligible: bool,
     quiz_is_open: bool,
@@ -50,15 +53,18 @@ pub(crate) struct QuizRevision {
     pub(crate) revision_no: i32,
     pub(crate) created_by: uuid::Uuid,
     pub(crate) change_reason: String,
+    #[allow(dead_code)]
     pub(crate) created_at: i64,
 }
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SessionStatus {
     InProgress,
     Submitted,
+    #[allow(dead_code)]
     Expired,
 }
-
+#[cfg(test)]
 pub(crate) struct AttemptSession {
     pub(crate) id: uuid::Uuid,
     pub(crate) user_id: uuid::Uuid,
@@ -67,7 +73,7 @@ pub(crate) struct AttemptSession {
     pub(crate) status: SessionStatus,
     pub(crate) started_at: i64,
 }
-
+#[cfg(test)]
 impl AttemptSession {
     pub(crate) fn new(
         id: uuid::Uuid,
@@ -86,16 +92,22 @@ impl AttemptSession {
     }
 }
 pub(crate) struct Quiz {
+    #[allow(dead_code)]
     pub(crate) id: uuid::Uuid,
+    #[allow(dead_code)]
     pub(crate) team_id: uuid::Uuid,
+    #[allow(dead_code)]
     pub(crate) title: String,
     pub(crate) status: QuizStatus,
     pub(crate) starts_at: Option<i64>,
     pub(crate) ends_at: Option<i64>,
     pub(crate) manually_closed_at: Option<i64>,
     pub(crate) max_attempts: u8,
+    #[allow(dead_code)]
     pub(crate) created_by: uuid::Uuid,
+    #[allow(dead_code)]
     pub(crate) description: Option<String>,
+    #[allow(dead_code)]
     pub(crate) created_at: i64,
 }
 

@@ -11,7 +11,7 @@ pub(crate) fn validate_question(question: &QuestionDraft) -> Result<(), &'static
 
     let option_count = question.options.len();
 
-    if option_count < 2 || option_count > 6 {
+    if !(2..=6).contains(&option_count) {
         return Err("Question must have between 2 and 6 options");
     }
 

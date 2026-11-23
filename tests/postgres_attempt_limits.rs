@@ -1,9 +1,6 @@
 use chrono::{Duration, Utc};
+use sphinx::{api::dto::AnswerInput, repository::participation::ParticipationRepository};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use sphinx::{
-    api::dto::AnswerInput,
-    repository::participation::ParticipationRepository,
-};
 use uuid::Uuid;
 
 async fn reset_schema(pool: &PgPool) {
@@ -56,31 +53,27 @@ async fn seed_quiz(pool: &PgPool, max_attempts: i16) -> (Uuid, Uuid, Uuid) {
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query(
-        "INSERT INTO quizzes VALUES($1,$2,'Attempts','open',$3,$4,NULL,$5)",
-    )
-    .bind(quiz)
-    .bind(team)
-    .bind(Utc::now() - Duration::minutes(1))
-    .bind(Utc::now() + Duration::minutes(10))
-    .bind(max_attempts)
-    .execute(pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO quizzes VALUES($1,$2,'Attempts','open',$3,$4,NULL,$5)")
+        .bind(quiz)
+        .bind(team)
+        .bind(Utc::now() - Duration::minutes(1))
+        .bind(Utc::now() + Duration::minutes(10))
+        .bind(max_attempts)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO quiz_revisions VALUES($1,$2,1)")
         .bind(revision)
         .bind(quiz)
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query(
-        "INSERT INTO question_versions VALUES($1,$2,0,'2+2?','[\"3\",\"4\"]',1,'Four')",
-    )
-    .bind(question)
-    .bind(revision)
-    .execute(pool)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO question_versions VALUES($1,$2,0,'2+2?','[\"3\",\"4\"]',1,'Four')")
+        .bind(question)
+        .bind(revision)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query("INSERT INTO quiz_eligibilities VALUES($1,$2)")
         .bind(quiz)
         .bind(user)
@@ -127,7 +120,11 @@ async fn honors_one_and_two_attempt_quiz_limits() {
     assert_eq!(first.attempt_number, 1);
     assert_eq!(first.remaining_attempts, 0);
     assert_eq!(
-        repository.start_session(one_quiz, one_user).await.unwrap_err().code(),
+        repository
+            .start_session(one_quiz, one_user)
+            .await
+            .unwrap_err()
+            .code(),
         "ATTEMPT_LIMIT_REACHED"
     );
 
@@ -139,7 +136,11 @@ async fn honors_one_and_two_attempt_quiz_limits() {
     assert_eq!(second.attempt_number, 2);
     assert_eq!(second.remaining_attempts, 0);
     assert_eq!(
-        repository.start_session(two_quiz, two_user).await.unwrap_err().code(),
+        repository
+            .start_session(two_quiz, two_user)
+            .await
+            .unwrap_err()
+            .code(),
         "ATTEMPT_LIMIT_REACHED"
     );
 

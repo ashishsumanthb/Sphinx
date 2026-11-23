@@ -54,7 +54,7 @@ pub(crate) struct SavedSubmission {
     answers: Vec<(Uuid, usize)>,
     pub(crate) score: Score,
 }
-
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn submit_answers<'a>(
     quiz: &Quiz,
     snapshot: &Snapshot,
@@ -147,10 +147,7 @@ pub(crate) fn questions_for_session(
         let question = &version.item.question;
         questions.push(PublicQuestion {
             id: version.id,
-            position: version
-                .position
-                .try_into()
-                .map_err(|_| "Invalid question position")?,
+            position: version.position,
             text: question.question_text.clone(),
             options: question.options.clone(),
         });
@@ -207,7 +204,7 @@ mod tests {
             quiz_id: quiz.id,
             revision_no: 2,
             created_by: admin_id,
-            change_reason: String::from("Corrected the answer key").into(),
+            change_reason: String::from("Corrected the answer key"),
             created_at: 1_150,
         };
 

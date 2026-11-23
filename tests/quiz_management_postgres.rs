@@ -70,7 +70,41 @@ async fn call(
 
     (status, response_body)
 }
+async fn call_raw_json(
+    app: Router,
+    method: Method,
+    uri: &str,
+    token: &str,
+    body: &str,
+) -> (StatusCode, Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header(AUTHORIZATION, format!("Bearer {token}"))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
 
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+
+    let response_body = serde_json::from_slice(&bytes).unwrap();
+
+    (status, response_body)
+}
+
+fn assert_structured_error(response: &Value) {
+    assert!(response["error"]["code"].is_string());
+    assert!(response["error"]["message"].is_string());
+
+    let request_id = response["error"]["request_id"].as_str().unwrap();
+    assert!(request_id.starts_with("req_"));
+}
 async fn register_user(app: Router, name: &str, email: &str, password: &str) -> Uuid {
     let (status, response) = call(
         app,
@@ -167,6 +201,32 @@ async fn quiz_management_api_is_transactional_and_revision_safe() {
     .await;
 
     let team_id = create_team(app.clone(), &admin_token).await;
+    let (status, response) = call(
+        app.clone(),
+        Method::POST,
+        "/api/v1/teams/not-a-uuid/quizzes",
+        Some(&admin_token),
+        Some(json!({
+            "title": "Malformed path",
+            "max_attempts": 1
+        })),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_structured_error(&response);
+
+    let (status, response) = call_raw_json(
+        app.clone(),
+        Method::POST,
+        &format!("/api/v1/teams/{team_id}/quizzes"),
+        &admin_token,
+        r#"{"title":"Broken JSON","max_attempts":1"#,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_structured_error(&response);
 
     let (status, _) = call(
         app.clone(),
