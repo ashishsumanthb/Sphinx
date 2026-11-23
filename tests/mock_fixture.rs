@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use sphinx::{
     api::dto::{
-        AttemptSessionResponse, AvailableQuizListResponse, MyAttemptsResponse,
+        AttemptSessionResponse, AvailableQuizListResponse, MyAttemptsResponse, MyResultsResponse,
         SubmitAttemptRequest, SubmitAttemptResponse,
     },
     domain::participation::{QuestionKey, validate_and_score},
@@ -20,7 +20,7 @@ struct Fixture {
 struct UpstreamRecords {
     users: Vec<UserRecord>,
     teams: Vec<TeamRecord>,
-    team_members: Vec<TeamMemberRecord>,
+    team_memberships: Vec<TeamMemberRecord>,
     quizzes: Vec<QuizRecord>,
     quiz_revisions: Vec<RevisionRecord>,
     question_versions: Vec<QuestionRecord>,
@@ -71,6 +71,7 @@ struct MockApiResponses {
     submission: SubmitAttemptResponse,
     identical_retry: SubmitAttemptResponse,
     my_attempts: MyAttemptsResponse,
+    my_results: MyResultsResponse,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,7 +91,7 @@ fn fixture_preserves_cross_service_relationships() {
     let fixture = fixture();
     let user = &fixture.upstream_records.users[0];
     let team = &fixture.upstream_records.teams[0];
-    let membership = &fixture.upstream_records.team_members[0];
+    let membership = &fixture.upstream_records.team_memberships[0];
     let quiz = &fixture.upstream_records.quizzes[0];
     let revision = &fixture.upstream_records.quiz_revisions[0];
     let eligibility = &fixture.upstream_records.quiz_eligibilities[0];
@@ -153,6 +154,14 @@ fn mock_api_results_deserialize_and_never_leak_answer_keys() {
         2
     );
     assert_eq!(fixture.mock_api_responses.my_attempts.attempts.len(), 1);
+    let results = serde_json::to_value(&fixture.mock_api_responses.my_results).unwrap();
+    for field in ["best_score", "best_percentage", "revision_number", "rank"] {
+        assert_eq!(results[field], results["revision_results"][0][field]);
+    }
+    assert_eq!(
+        results["attempts"][0]["quiz_revision_id"],
+        results["revision_results"][0]["quiz_revision_id"]
+    );
 
     let public_json = serde_json::to_value(&fixture.mock_api_responses.attempt_session.questions)
         .unwrap()

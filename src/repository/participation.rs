@@ -1,14 +1,14 @@
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Executor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::{
     api::{
         dto::{
-            AnswerInput, AttemptSessionResponse, AvailableQuizResponse, MyAttemptResponse,
-            AttemptQuestionReviewResponse, AttemptReviewResponse, MyResultsResponse,
+            AnswerInput, AttemptQuestionReviewResponse, AttemptReviewResponse,
+            AttemptSessionResponse, AvailableQuizResponse, MyAttemptResponse, MyResultsResponse,
             ParticipantAnalyticsResponse, PublicQuestionResponse, QuizAnalyticsResponse,
-            SubmitAttemptResponse,
+            RevisionResultResponse, SubmitAttemptResponse,
         },
         error::AppError,
     },
@@ -361,27 +361,7 @@ impl ParticipationRepository {
         quiz_id: Uuid,
         user_id: Uuid,
     ) -> Result<Vec<MyAttemptResponse>, AppError> {
-        let rows = sqlx::query_as::<_, (Uuid, Uuid, i16, i32, i32, DateTime<Utc>)>(
-            r#"SELECT id, quiz_id, attempt_no, score, total_questions, submitted_at
-               FROM quiz_attempts WHERE quiz_id = $1 AND user_id = $2
-               ORDER BY submitted_at"#,
-        )
-        .bind(quiz_id)
-        .bind(user_id)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| MyAttemptResponse {
-                attempt_id: row.0,
-                quiz_id: row.1,
-                attempt_number: row.2 as u8,
-                score: row.3 as u32,
-                total_questions: row.4 as u32,
-                percentage: percentage(row.3 as u32, row.4 as u32),
-                submitted_at: row.5,
-            })
-            .collect())
+        load_my_attempts(&self.pool, quiz_id, user_id).await
     }
 
     pub async fn attempt_review(
@@ -444,33 +424,80 @@ impl ParticipationRepository {
         quiz_id: Uuid,
         user_id: Uuid,
     ) -> Result<MyResultsResponse, AppError> {
-        let attempts = self.my_attempts(quiz_id, user_id).await?;
-        let ranked = sqlx::query_as::<_, (i32, i64)>(
-            r#"WITH scores AS (
-                   SELECT a.user_id, r.revision_no,
-                          MAX(a.score::double precision / a.total_questions) AS ratio
-                   FROM quiz_attempts a JOIN quiz_revisions r ON r.id = a.quiz_revision_id
-                   WHERE a.quiz_id = $1 GROUP BY a.user_id, r.revision_no
-               ), ranked AS (
-                   SELECT *, RANK() OVER (PARTITION BY revision_no ORDER BY ratio DESC) AS rank
-                   FROM scores
-               ) SELECT revision_no, rank FROM ranked WHERE user_id = $2
-               ORDER BY revision_no DESC LIMIT 1"#,
+        // Authorization, personal history and rankings must share one snapshot.
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            .execute(&mut *transaction)
+            .await?;
+        let authorized = sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM quizzes q
+                   JOIN team_memberships tm ON tm.team_id = q.team_id AND tm.user_id = $2
+                   WHERE q.id = $1 AND (
+                       tm.role = 'admin' OR EXISTS (
+                           SELECT 1 FROM quiz_eligibilities e
+                           WHERE e.quiz_id = q.id AND e.user_id = $2
+                       )
+                   )
+               )"#,
         )
         .bind(quiz_id)
         .bind(user_id)
-        .fetch_optional(&self.pool)
+        .fetch_one(&mut *transaction)
         .await?;
-        let best = attempts
-            .iter()
-            .max_by(|left, right| left.percentage.total_cmp(&right.percentage));
+        if !authorized {
+            return Err(AppError::forbidden(
+                "Quiz eligibility or team administrator access is required",
+            ));
+        }
+
+        let attempts = load_my_attempts(&mut *transaction, quiz_id, user_id).await?;
+        let ranked = sqlx::query_as::<_, (Uuid, i32, i32, i32, i64)>(
+            r#"WITH best_scores AS (
+                   SELECT DISTINCT ON (a.user_id, a.quiz_revision_id)
+                          a.user_id, a.quiz_revision_id, r.revision_no,
+                          a.score, a.total_questions,
+                          a.score::numeric / a.total_questions AS ratio
+                   FROM quiz_attempts a
+                   JOIN quiz_revisions r ON r.id = a.quiz_revision_id
+                   WHERE a.quiz_id = $1
+                   ORDER BY a.user_id, a.quiz_revision_id, ratio DESC,
+                            a.submitted_at, a.id
+               ), ranked AS (
+                   SELECT *, RANK() OVER (
+                       PARTITION BY quiz_revision_id ORDER BY ratio DESC
+                   ) AS rank
+                   FROM best_scores
+               )
+               SELECT quiz_revision_id, revision_no, score, total_questions, rank
+               FROM ranked WHERE user_id = $2 ORDER BY revision_no"#,
+        )
+        .bind(quiz_id)
+        .bind(user_id)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let revision_results: Vec<_> = ranked
+            .into_iter()
+            .map(|row| RevisionResultResponse {
+                quiz_revision_id: row.0,
+                revision_number: row.1 as u32,
+                best_score: row.2 as u32,
+                best_percentage: percentage(row.2 as u32, row.3 as u32),
+                rank: row.4 as u64,
+            })
+            .collect();
+        transaction.commit().await?;
+
+        // Every summary field comes from the highest revision_no attempted.
+        let latest = revision_results.last();
         Ok(MyResultsResponse {
             quiz_id,
-            best_score: best.map(|attempt| attempt.score),
-            best_percentage: best.map(|attempt| attempt.percentage),
-            revision_number: ranked.map(|row| row.0 as u32),
-            rank: ranked.map(|row| row.1 as u64),
+            best_score: latest.map(|result| result.best_score),
+            best_percentage: latest.map(|result| result.best_percentage),
+            revision_number: latest.map(|result| result.revision_number),
+            rank: latest.map(|result| result.rank),
             attempts,
+            revision_results,
         })
     }
 
@@ -525,8 +552,7 @@ impl ParticipationRepository {
             eligible_members: counts.0 as u64,
             unique_participants: counts.1 as u64,
             total_submissions: counts.2 as u64,
-            participation_rate: (counts.0 > 0)
-                .then(|| counts.1 as f64 * 100.0 / counts.0 as f64),
+            participation_rate: (counts.0 > 0).then(|| counts.1 as f64 * 100.0 / counts.0 as f64),
             average_score_percentage: counts.3,
             participants: rows
                 .into_iter()
@@ -541,6 +567,38 @@ impl ParticipationRepository {
                 .collect(),
         })
     }
+}
+
+async fn load_my_attempts<'e>(
+    executor: impl Executor<'e, Database = Postgres>,
+    quiz_id: Uuid,
+    user_id: Uuid,
+) -> Result<Vec<MyAttemptResponse>, AppError> {
+    let rows = sqlx::query_as::<_, (Uuid, Uuid, i16, i32, i32, DateTime<Utc>, Uuid, i32)>(
+        r#"SELECT a.id, a.quiz_id, a.attempt_no, a.score, a.total_questions,
+                  a.submitted_at, a.quiz_revision_id, r.revision_no
+           FROM quiz_attempts a JOIN quiz_revisions r ON r.id = a.quiz_revision_id
+           WHERE a.quiz_id = $1 AND a.user_id = $2
+           ORDER BY a.submitted_at, a.id"#,
+    )
+    .bind(quiz_id)
+    .bind(user_id)
+    .fetch_all(executor)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| MyAttemptResponse {
+            attempt_id: row.0,
+            quiz_id: row.1,
+            attempt_number: row.2 as u8,
+            score: row.3 as u32,
+            total_questions: row.4 as u32,
+            percentage: percentage(row.3 as u32, row.4 as u32),
+            submitted_at: row.5,
+            quiz_revision_id: row.6,
+            revision_number: row.7 as u32,
+        })
+        .collect())
 }
 
 type ExistingAttempt = (Uuid, Uuid, i32, i32, DateTime<Utc>, Uuid, String, i16, i16);

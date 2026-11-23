@@ -68,6 +68,8 @@ pub struct SubmitAttemptResponse {
 pub struct MyAttemptResponse {
     pub attempt_id: Uuid,
     pub quiz_id: Uuid,
+    pub quiz_revision_id: Uuid,
+    pub revision_number: u32,
     pub attempt_number: u8,
     pub score: u32,
     pub total_questions: u32,
@@ -106,11 +108,22 @@ pub struct AttemptReviewResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MyResultsResponse {
     pub quiz_id: Uuid,
+    /// Summary of the highest revision_no attempted by this user.
     pub best_score: Option<u32>,
     pub best_percentage: Option<f64>,
     pub revision_number: Option<u32>,
     pub rank: Option<u64>,
     pub attempts: Vec<MyAttemptResponse>,
+    pub revision_results: Vec<RevisionResultResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevisionResultResponse {
+    pub quiz_revision_id: Uuid,
+    pub revision_number: u32,
+    pub best_score: u32,
+    pub best_percentage: f64,
+    pub rank: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

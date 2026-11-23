@@ -1,10 +1,10 @@
 pub mod api;
-pub mod domain;
-pub mod repository;
-pub mod services;
 pub mod auth;
+pub mod domain;
 pub mod password;
 pub(crate) mod permissions;
+pub mod repository;
+pub mod services;
 pub mod session;
 pub mod teams;
 

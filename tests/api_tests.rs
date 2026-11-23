@@ -3,11 +3,8 @@ use axum::{
     http::{Request, StatusCode},
 };
 use http_body_util::BodyExt;
+use sphinx::{AppState, api::routes::participation_routes};
 use sqlx::postgres::PgPoolOptions;
-use sphinx::{
-    AppState,
-    api::routes::participation_routes,
-};
 use tower::ServiceExt;
 use uuid::Uuid;
 

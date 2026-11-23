@@ -1,43 +1,22 @@
 use chrono::{Duration, Utc};
+use sphinx::{api::dto::AnswerInput, repository::participation::ParticipationRepository};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use sphinx::{
-    api::dto::AnswerInput,
-    repository::participation::ParticipationRepository,
-};
 use uuid::Uuid;
 
 async fn reset_schema(pool: &PgPool) {
-    sqlx::raw_sql(
-        r#"DROP SCHEMA public CASCADE; CREATE SCHEMA public;
-        CREATE EXTENSION IF NOT EXISTS pgcrypto;
-        CREATE TABLE users (id UUID PRIMARY KEY);
-        CREATE TABLE teams (id UUID PRIMARY KEY);
-        CREATE TABLE team_members (
-            team_id UUID REFERENCES teams(id), user_id UUID REFERENCES users(id),
-            role TEXT NOT NULL, PRIMARY KEY(team_id,user_id));
-        CREATE TABLE quizzes (
-            id UUID PRIMARY KEY, team_id UUID REFERENCES teams(id), title TEXT NOT NULL,
-            status TEXT NOT NULL, starts_at TIMESTAMPTZ NOT NULL, ends_at TIMESTAMPTZ NOT NULL,
-            manually_closed_at TIMESTAMPTZ, max_attempts SMALLINT NOT NULL);
-        CREATE TABLE quiz_revisions (
-            id UUID PRIMARY KEY, quiz_id UUID REFERENCES quizzes(id), revision_no INT NOT NULL,
-            UNIQUE(quiz_id,id));
-        CREATE TABLE question_versions (
-            id UUID PRIMARY KEY, quiz_revision_id UUID REFERENCES quiz_revisions(id),
-            position INT NOT NULL, question_text TEXT NOT NULL, options JSONB NOT NULL,
-            correct_option_index INT NOT NULL, explanation TEXT NOT NULL,
-            UNIQUE(quiz_revision_id,id));
-        CREATE TABLE quiz_eligibilities (
-            quiz_id UUID REFERENCES quizzes(id), user_id UUID REFERENCES users(id),
-            PRIMARY KEY(quiz_id,user_id));"#,
-    )
-    .execute(pool)
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!("../migrations/0030_participation.sql"))
+    sqlx::raw_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
         .execute(pool)
         .await
         .unwrap();
+    sqlx::migrate::Migrator::new(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/migrations"
+    )))
+    .await
+    .unwrap()
+    .run(pool)
+    .await
+    .unwrap();
 }
 
 async fn seed_quiz(pool: &PgPool, max_attempts: i16) -> (Uuid, Uuid, Uuid) {
@@ -46,42 +25,54 @@ async fn seed_quiz(pool: &PgPool, max_attempts: i16) -> (Uuid, Uuid, Uuid) {
     let quiz = Uuid::new_v4();
     let revision = Uuid::new_v4();
     let question = Uuid::new_v4();
-    sqlx::query("INSERT INTO users VALUES($1)")
+    sqlx::query("INSERT INTO users(id,name,email,password_encoded) VALUES($1,'Member',$2,'hash')")
+        .bind(user)
+        .bind(format!("{user}@example.com"))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO teams(id,name,created_by) VALUES($1,'Attempts team',$2)")
+        .bind(team)
         .bind(user)
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO teams VALUES($1)")
+    sqlx::query("INSERT INTO team_memberships(team_id,user_id,role) VALUES($1,$2,'member')")
         .bind(team)
+        .bind(user)
         .execute(pool)
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO quizzes VALUES($1,$2,'Attempts','open',$3,$4,NULL,$5)",
+        "INSERT INTO quizzes(id,team_id,created_by,title,status,starts_at,ends_at,max_attempts)
+         VALUES($1,$2,$6,'Attempts','open',$3,$4,$5)",
     )
     .bind(quiz)
     .bind(team)
     .bind(Utc::now() - Duration::minutes(1))
     .bind(Utc::now() + Duration::minutes(10))
     .bind(max_attempts)
+    .bind(user)
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO quiz_revisions VALUES($1,$2,1)")
+    sqlx::query("INSERT INTO quiz_revisions(id,quiz_id,revision_no,created_by,change_reason) VALUES($1,$2,1,$3,'Initial revision')")
         .bind(revision)
         .bind(quiz)
+        .bind(user)
         .execute(pool)
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO question_versions VALUES($1,$2,0,'2+2?','[\"3\",\"4\"]',1,'Four')",
+        "INSERT INTO question_versions(id,quiz_revision_id,stable_question_id,position,question_text,options,correct_option_index,explanation)
+         VALUES($1,$2,$1,0,'2+2?','[\"3\",\"4\"]',1,'Four')",
     )
     .bind(question)
     .bind(revision)
     .execute(pool)
     .await
     .unwrap();
-    sqlx::query("INSERT INTO quiz_eligibilities VALUES($1,$2)")
+    sqlx::query("INSERT INTO quiz_eligibilities(quiz_id,user_id) VALUES($1,$2)")
         .bind(quiz)
         .bind(user)
         .execute(pool)
@@ -127,7 +118,11 @@ async fn honors_one_and_two_attempt_quiz_limits() {
     assert_eq!(first.attempt_number, 1);
     assert_eq!(first.remaining_attempts, 0);
     assert_eq!(
-        repository.start_session(one_quiz, one_user).await.unwrap_err().code(),
+        repository
+            .start_session(one_quiz, one_user)
+            .await
+            .unwrap_err()
+            .code(),
         "ATTEMPT_LIMIT_REACHED"
     );
 
@@ -139,7 +134,11 @@ async fn honors_one_and_two_attempt_quiz_limits() {
     assert_eq!(second.attempt_number, 2);
     assert_eq!(second.remaining_attempts, 0);
     assert_eq!(
-        repository.start_session(two_quiz, two_user).await.unwrap_err().code(),
+        repository
+            .start_session(two_quiz, two_user)
+            .await
+            .unwrap_err()
+            .code(),
         "ATTEMPT_LIMIT_REACHED"
     );
 

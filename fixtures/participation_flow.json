@@ -3,9 +3,16 @@
     "users": [
       {
         "id": "10000000-0000-4000-8000-000000000001",
-        "username": "member_three_fixture",
+        "name": "Member Three Fixture",
         "email": "member3@example.test",
-        "password_hash": "$argon2id$fixture-not-for-authentication",
+        "password_encoded": "$argon2id$fixture-not-for-authentication",
+        "created_at": "2026-11-22T09:00:00Z"
+      },
+      {
+        "id": "10000000-0000-4000-8000-000000000099",
+        "name": "Fixture Admin",
+        "email": "admin@example.test",
+        "password_encoded": "$argon2id$fixture-not-for-authentication",
         "created_at": "2026-11-22T09:00:00Z"
       }
     ],
@@ -13,16 +20,22 @@
       {
         "id": "20000000-0000-4000-8000-000000000001",
         "name": "Platform Team",
-        "created_at": "2026-11-22T09:00:00Z",
-        "deleted_at": null
+        "created_by": "10000000-0000-4000-8000-000000000099",
+        "created_at": "2026-11-22T09:00:00Z"
       }
     ],
-    "team_members": [
+    "team_memberships": [
       {
         "team_id": "20000000-0000-4000-8000-000000000001",
         "user_id": "10000000-0000-4000-8000-000000000001",
         "role": "member",
         "joined_at": "2026-11-22T09:05:00Z"
+      },
+      {
+        "team_id": "20000000-0000-4000-8000-000000000001",
+        "user_id": "10000000-0000-4000-8000-000000000099",
+        "role": "admin",
+        "joined_at": "2026-11-22T09:00:00Z"
       }
     ],
     "quizzes": [
@@ -156,11 +169,42 @@
         {
           "attempt_id": "70000000-0000-4000-8000-000000000001",
           "quiz_id": "30000000-0000-4000-8000-000000000001",
+          "quiz_revision_id": "40000000-0000-4000-8000-000000000001",
+          "revision_number": 1,
           "attempt_number": 1,
           "score": 1,
           "total_questions": 2,
           "percentage": 50.0,
           "submitted_at": "2026-11-22T09:35:00Z"
+        }
+      ]
+    },
+    "my_results": {
+      "quiz_id": "30000000-0000-4000-8000-000000000001",
+      "best_score": 1,
+      "best_percentage": 50.0,
+      "revision_number": 1,
+      "rank": 1,
+      "attempts": [
+        {
+          "attempt_id": "70000000-0000-4000-8000-000000000001",
+          "quiz_id": "30000000-0000-4000-8000-000000000001",
+          "quiz_revision_id": "40000000-0000-4000-8000-000000000001",
+          "revision_number": 1,
+          "attempt_number": 1,
+          "score": 1,
+          "total_questions": 2,
+          "percentage": 50.0,
+          "submitted_at": "2026-11-22T09:35:00Z"
+        }
+      ],
+      "revision_results": [
+        {
+          "quiz_revision_id": "40000000-0000-4000-8000-000000000001",
+          "revision_number": 1,
+          "best_score": 1,
+          "best_percentage": 50.0,
+          "rank": 1
         }
       ]
     }
@@ -172,7 +216,6 @@
         "quiz_id": "30000000-0000-4000-8000-000000000001",
         "user_id": "10000000-0000-4000-8000-000000000001",
         "quiz_revision_id": "40000000-0000-4000-8000-000000000001",
-        "attempt_no": 1,
         "status": "submitted",
         "started_at": "2026-11-22T09:31:00Z"
       }
@@ -184,7 +227,8 @@
         "quiz_id": "30000000-0000-4000-8000-000000000001",
         "user_id": "10000000-0000-4000-8000-000000000001",
         "quiz_revision_id": "40000000-0000-4000-8000-000000000001",
-        "request_hash": "computed-by-canonical-request-hash",
+        "attempt_no": 1,
+        "request_hash": "442cc2ff666a26848c75115a62506a1a8b4aef4e9d5ebcb9a35c5850af31c28e",
         "score": 1,
         "total_questions": 2,
         "submitted_at": "2026-11-22T09:35:00Z"

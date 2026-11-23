@@ -1,31 +1,49 @@
 use chrono::Utc;
 use sphinx::api::dto::{
     AttemptQuestionReviewResponse, AttemptReviewResponse, MyAttemptResponse, MyResultsResponse,
-    ParticipantAnalyticsResponse, QuizAnalyticsResponse,
+    ParticipantAnalyticsResponse, QuizAnalyticsResponse, RevisionResultResponse,
 };
 use uuid::Uuid;
 
 #[test]
 fn member_results_are_personal_and_revision_aware() {
+    let quiz_id = Uuid::new_v4();
+    let revision_id = Uuid::new_v4();
     let results = MyResultsResponse {
-        quiz_id: Uuid::new_v4(),
+        quiz_id,
         best_score: Some(2),
         best_percentage: Some(100.0),
         revision_number: Some(2),
         rank: Some(1),
         attempts: vec![MyAttemptResponse {
             attempt_id: Uuid::new_v4(),
-            quiz_id: Uuid::new_v4(),
+            quiz_id,
+            quiz_revision_id: revision_id,
+            revision_number: 2,
             attempt_number: 1,
             score: 2,
             total_questions: 2,
             percentage: 100.0,
             submitted_at: Utc::now(),
         }],
+        revision_results: vec![RevisionResultResponse {
+            quiz_revision_id: revision_id,
+            revision_number: 2,
+            best_score: 2,
+            best_percentage: 100.0,
+            rank: 1,
+        }],
     };
     let json = serde_json::to_value(results).unwrap();
     assert_eq!(json["revision_number"], 2);
     assert_eq!(json["rank"], 1);
+    for field in ["best_score", "best_percentage", "revision_number", "rank"] {
+        assert_eq!(json[field], json["revision_results"][0][field]);
+    }
+    assert_eq!(
+        json["attempts"][0]["quiz_revision_id"],
+        json["revision_results"][0]["quiz_revision_id"]
+    );
     assert!(json.get("participants").is_none());
     assert!(json.get("correct_option_index").is_none());
 }
