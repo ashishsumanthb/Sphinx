@@ -40,6 +40,8 @@ let demoWorkspace = null;
 let activeAttempt = null;
 let teamMemberships = [];
 let selectedTeam = null;
+let teamContextRequest = 0;
+let availableQuizzesRequest = 0;
 
 let mode = 'login';
 let session = restoreSession();
@@ -151,6 +153,12 @@ async function apiRequest(path, { method = 'GET', body, token } = {}) {
   if (!response.ok) {
     const error = new Error(errorMessage(payload, `Request failed with HTTP ${response.status}`));
     error.status = response.status;
+    if (response.status === 401 && token && session?.token === token) {
+      clearSession();
+      showLogin();
+      error.message = 'Your session expired. Please log in again.';
+      showToast(error.message);
+    }
     throw error;
   }
   return payload;
@@ -245,10 +253,14 @@ function showAuthenticated() {
 }
 
 async function loadTeamContext(preferredTeamId = demoWorkspace?.teamId) {
+  const requestId = ++teamContextRequest;
   const studioTab = document.querySelector('[data-workspace="studio"]');
   const select = document.querySelector('#team-context-select');
+  select.disabled = true;
   try {
-    teamMemberships = await apiRequest('/api/v1/teams', { token: session.token });
+    const response = await apiRequest('/api/v1/teams', { token: session.token });
+    if (requestId !== teamContextRequest || !session) return;
+    teamMemberships = Array.isArray(response) ? response : [];
     select.replaceChildren();
     if (!teamMemberships.length) {
       select.append(new Option('No team yet — create one in Admin studio', ''));
@@ -259,18 +271,21 @@ async function loadTeamContext(preferredTeamId = demoWorkspace?.teamId) {
       return;
     }
     teamMemberships.forEach((team) => select.append(new Option(`${team.name} · ${team.role}`, team.id)));
-    const storedTeamId = window.localStorage.getItem('sphinx.selected-team');
+    const storedTeamId = window.localStorage.getItem(selectedTeamStorageKey());
     select.value = teamMemberships.some((team) => team.id === preferredTeamId)
       ? preferredTeamId
       : teamMemberships.some((team) => team.id === storedTeamId) ? storedTeamId : teamMemberships[0].id;
-    selectedTeam = teamMemberships.find((team) => team.id === select.value);
+    selectedTeam = teamMemberships.find((team) => team.id === select.value) || null;
     applySelectedTeamRole();
-    if (selectedTeam.role !== 'admin') {
+    if (selectedTeam?.role !== 'admin') {
       switchWorkspace('play');
       showToast('Member access: take eligible quizzes and view your results.');
     }
   } catch (error) {
+    if (requestId !== teamContextRequest) return;
     showToast(`Could not load team roles: ${error.message}`);
+  } finally {
+    if (requestId === teamContextRequest) select.disabled = false;
   }
 }
 
@@ -285,7 +300,7 @@ function applySelectedTeamRole() {
     switchWorkspace('play');
   }
   if (selectedTeam) {
-    window.localStorage.setItem('sphinx.selected-team', selectedTeam.id);
+    window.localStorage.setItem(selectedTeamStorageKey(), selectedTeam.id);
     loadAvailableQuizzes(selectedTeam.id);
   } else {
     renderAvailableQuizzes([]);
@@ -300,15 +315,19 @@ document.querySelector('#team-context-select').addEventListener('change', (event
 document.querySelector('#refresh-teams').addEventListener('click', () => loadTeamContext(selectedTeam?.id));
 
 async function loadAvailableQuizzes(teamId) {
+  const requestId = ++availableQuizzesRequest;
   const copy = document.querySelector('#available-copy');
   copy.textContent = 'Loading eligible quizzes…';
   try {
     const response = await apiRequest(`/api/v1/teams/${teamId}/quizzes/available`, { token: session.token });
-    renderAvailableQuizzes(response.quizzes || []);
-    copy.textContent = response.quizzes?.length
+    if (requestId !== availableQuizzesRequest || selectedTeam?.id !== teamId) return;
+    const quizzes = Array.isArray(response?.quizzes) ? response.quizzes : [];
+    renderAvailableQuizzes(quizzes);
+    copy.textContent = quizzes.length
       ? 'Choose an open quiz from this team.'
       : 'No eligible open quizzes are available for this team.';
   } catch (error) {
+    if (requestId !== availableQuizzesRequest) return;
     renderAvailableQuizzes([]);
     copy.textContent = error.message;
   }
@@ -324,7 +343,7 @@ function renderAvailableQuizzes(quizzes) {
     const title = document.createElement('strong');
     title.textContent = quiz.title;
     const detail = document.createElement('small');
-    detail.textContent = `Open until ${new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(quiz.ends_at))}`;
+    detail.textContent = `Open until ${formatDateTime(quiz.ends_at, { timeStyle: 'short' })}`;
     button.append(title, detail);
     button.addEventListener('click', () => {
       document.querySelector('#play-quiz-id').value = quiz.id;
@@ -345,6 +364,10 @@ document.querySelector('#copy-user-id').addEventListener('click', async () => {
 });
 
 function showLogin() {
+  teamContextRequest += 1;
+  availableQuizzesRequest += 1;
+  teamMemberships = [];
+  selectedTeam = null;
   successState.classList.remove('is-visible');
   resultsView.classList.add('is-hidden');
   authWrap.classList.remove('results-mode');
@@ -353,6 +376,10 @@ function showLogin() {
   form.reset();
   setMode('login');
   activeAttempt = null;
+  document.querySelector('#quiz-launch').classList.remove('is-hidden');
+  document.querySelector('#quiz-player').classList.add('is-hidden');
+  document.querySelector('#quiz-player').replaceChildren();
+  document.querySelector('#submission-result').classList.add('is-hidden');
 }
 
 function restoreDemoWorkspace() {
@@ -372,12 +399,22 @@ function demoStorageKey() {
   return session?.user?.id ? `${DEMO_KEY}.${session.user.id}` : DEMO_KEY;
 }
 
+function selectedTeamStorageKey() {
+  return session?.user?.id ? `sphinx.selected-team.${session.user.id}` : 'sphinx.selected-team';
+}
+
 function switchWorkspace(name) {
+  if (name === 'studio' && selectedTeam && selectedTeam.role !== 'admin') {
+    showToast('Admin Studio is available only to this team’s administrator.');
+    name = 'play';
+  }
+  const panel = document.querySelector(`#${name}-workspace`);
+  if (!panel) return;
   document.querySelectorAll('.workspace-tab').forEach((tab) => {
     tab.classList.toggle('is-active', tab.dataset.workspace === name);
   });
   document.querySelectorAll('.workspace-panel').forEach((panel) => panel.classList.add('is-hidden'));
-  document.querySelector(`#${name}-workspace`).classList.remove('is-hidden');
+  panel.classList.remove('is-hidden');
 }
 
 document.querySelectorAll('.workspace-tab').forEach((tab) => {
@@ -430,22 +467,30 @@ function setWorkflowStatus(message, kind = '') {
 }
 
 function restoreDemoControls() {
-  const start = document.querySelector('#start-demo-quiz');
+  const quizInput = document.querySelector('#play-quiz-id');
+  const resultsInput = document.querySelector('#results-quiz-id');
+  quizInput.value = '';
+  resultsInput.value = '';
+  document.querySelector('#play-availability').textContent = 'Waiting for quiz';
   if (!demoWorkspace?.quizId) {
     updateStartAvailability();
     return;
   }
-  document.querySelector('#play-quiz-id').value = demoWorkspace.quizId;
+  quizInput.value = demoWorkspace.quizId;
   updateStartAvailability();
   document.querySelector('#play-availability').textContent = 'Published · ready';
   document.querySelector('#quiz-launch p').textContent = `${demoWorkspace.title} is published and ready to start.`;
-  document.querySelector('#results-quiz-id').value = demoWorkspace.quizId;
+  resultsInput.value = demoWorkspace.quizId;
   setWorkflowStatus(`Published “${demoWorkspace.title}”. Team ID: ${demoWorkspace.teamId}. Quiz ID: ${demoWorkspace.quizId}`, 'is-success');
 }
 
 function updateStartAvailability() {
   const quizId = document.querySelector('#play-quiz-id').value.trim();
-  document.querySelector('#start-demo-quiz').disabled = !/^[0-9a-f-]{36}$/i.test(quizId);
+  document.querySelector('#start-demo-quiz').disabled = !isUuid(quizId);
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 document.querySelector('#play-quiz-id').addEventListener('input', updateStartAvailability);
@@ -461,10 +506,15 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
     showToast('Select an admin team or enter a new team name, then enter a quiz title.');
     return;
   }
+  if (memberId && !isUuid(memberId)) {
+    showToast('Enter a valid member user ID, or leave it blank.');
+    return;
+  }
   button.disabled = true;
   label.textContent = canUseSelectedTeam ? 'Using admin team…' : 'Creating team…';
+  let team = selectedTeam;
+  let quiz = null;
   try {
-    let team = selectedTeam;
     if (!canUseSelectedTeam) {
       team = await apiRequest('/api/v1/teams', {
         method: 'POST', token: session.token, body: { name: teamName }
@@ -478,7 +528,7 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
       });
     }
     label.textContent = 'Creating quiz…';
-    const quiz = await apiRequest(`/api/v1/teams/${team.id}/quizzes`, {
+    quiz = await apiRequest(`/api/v1/teams/${team.id}/quizzes`, {
       method: 'POST', token: session.token,
       body: { title, description: 'Prepared for the Sphinx presentation demo', max_attempts: 2 }
     });
@@ -502,7 +552,8 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
       showToast('Quiz published. The admin account can also start it as an eligible team member.');
     }
   } catch (error) {
-    setWorkflowStatus(error.message, 'is-error');
+    const retained = quiz ? ` Draft quiz ${quiz.id} was retained for inspection.` : '';
+    setWorkflowStatus(`${error.message}${retained}`, 'is-error');
     showToast(error.message);
   } finally {
     button.disabled = false;
@@ -515,7 +566,7 @@ function renderQuizPlayer(attempt) {
   player.replaceChildren();
   const meta = document.createElement('p');
   meta.className = 'quiz-meta';
-  meta.textContent = `Attempt ${attempt.attempt_number} of ${attempt.max_attempts} · closes ${new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(attempt.deadline))}`;
+  meta.textContent = `Attempt ${attempt.attempt_number} of ${attempt.max_attempts} · closes ${formatDateTime(attempt.deadline, { timeStyle: 'short' })}`;
   player.append(meta);
   attempt.questions.forEach((question, questionIndex) => {
     const fieldset = document.createElement('fieldset');
@@ -595,7 +646,13 @@ document.querySelector('#quiz-player').addEventListener('submit', async (event) 
 });
 
 function formatPercentage(value) {
-  return value == null ? '—' : `${Number(value).toFixed(1).replace(/\.0$/, '')}%`;
+  const number = Number(value);
+  return value == null || !Number.isFinite(number) ? '—' : `${number.toFixed(1).replace(/\.0$/, '')}%`;
+}
+
+function formatDateTime(value, options) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'time unavailable' : new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
 function resultRow(label, value, detail) {
@@ -646,7 +703,7 @@ function renderResults(results) {
     .map((attempt) => resultRow(
       `Attempt ${attempt.attempt_number}`,
       `${attempt.score}/${attempt.total_questions} · ${formatPercentage(attempt.percentage)}`,
-      new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(attempt.submitted_at))
+      formatDateTime(attempt.submitted_at, { dateStyle: 'medium', timeStyle: 'short' })
     ));
   renderList(document.querySelector('#attempt-results'), attempts, 'You have not submitted an attempt for this quiz.');
   resultsView.classList.remove('is-hidden');
@@ -656,7 +713,7 @@ resultsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const quizInput = document.querySelector('#results-quiz-id');
   const quizId = quizInput.value.trim();
-  const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(quizId);
+  const validUuid = isUuid(quizId);
   setError(quizInput, validUuid ? '' : 'Enter a valid quiz UUID');
   if (!validUuid) return;
 
@@ -668,13 +725,7 @@ resultsForm.addEventListener('submit', async (event) => {
     const results = await apiRequest(`/api/v1/quizzes/${encodeURIComponent(quizId)}/my-results`, { token: session.token });
     renderResults(results);
   } catch (error) {
-    if (error.status === 401) {
-      clearSession();
-      showLogin();
-      showToast('Your session expired. Please log in again.');
-    } else {
-      showToast(error.message);
-    }
+    showToast(error.message);
   } finally {
     button.disabled = false;
     label.textContent = 'Load my results';
