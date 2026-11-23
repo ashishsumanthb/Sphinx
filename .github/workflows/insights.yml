@@ -12,8 +12,10 @@ jobs:
           POSTGRES_DB: sphinx_test
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U sphinx_test -d sphinx_test'
-          --health-interval 5s --health-timeout 5s --health-retries 12
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       INSIGHTS_TEST_DATABASE_URL: postgres://sphinx_test:local_ci_only@127.0.0.1:5432/sphinx_test
     steps:
