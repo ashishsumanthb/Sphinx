@@ -238,6 +238,23 @@ function showAuthenticated() {
   renderPreparedQuestions();
   restoreDemoControls();
   switchWorkspace('studio');
+  configureRoleNavigation();
+}
+
+async function configureRoleNavigation() {
+  const studioTab = document.querySelector('[data-workspace="studio"]');
+  try {
+    const teams = await apiRequest('/api/v1/teams', { token: session.token });
+    const hasAdminRole = teams.some((team) => team.role === 'admin');
+    const isMemberOnly = teams.length > 0 && !hasAdminRole;
+    studioTab.classList.toggle('is-hidden', isMemberOnly);
+    if (isMemberOnly) {
+      switchWorkspace('play');
+      showToast('Member access: take eligible quizzes and view your results.');
+    }
+  } catch (error) {
+    showToast(`Could not load team roles: ${error.message}`);
+  }
 }
 
 document.querySelector('#copy-user-id').addEventListener('click', async () => {
