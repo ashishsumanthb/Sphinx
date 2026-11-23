@@ -5,8 +5,8 @@ use uuid::Uuid;
 use crate::{
     api::{
         dto::{
-            AnswerInput, AttemptSessionResponse, AvailableQuizResponse, MyAttemptResponse,
-            AttemptQuestionReviewResponse, AttemptReviewResponse, MyResultsResponse,
+            AnswerInput, AttemptQuestionReviewResponse, AttemptReviewResponse,
+            AttemptSessionResponse, AvailableQuizResponse, MyAttemptResponse, MyResultsResponse,
             ParticipantAnalyticsResponse, PublicQuestionResponse, QuizAnalyticsResponse,
             SubmitAttemptResponse,
         },
@@ -525,8 +525,7 @@ impl ParticipationRepository {
             eligible_members: counts.0 as u64,
             unique_participants: counts.1 as u64,
             total_submissions: counts.2 as u64,
-            participation_rate: (counts.0 > 0)
-                .then(|| counts.1 as f64 * 100.0 / counts.0 as f64),
+            participation_rate: (counts.0 > 0).then(|| counts.1 as f64 * 100.0 / counts.0 as f64),
             average_score_percentage: counts.3,
             participants: rows
                 .into_iter()
