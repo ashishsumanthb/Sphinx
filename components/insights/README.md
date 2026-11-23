@@ -1,3 +1,8 @@
+> Integrated use: this crate is a root workspace member/path dependency. The host
+> uses `results::my_results` through its existing authenticated route. Do not mount
+> the demo router into the host. See [INTEGRATION.md](docs/INTEGRATION.md).
+> Run `bash scripts/verify_insights.sh` from the repository root for host verification.
+
 # Sphinx Insights component
 
 Runnable member-results component for the Sphinx collaborative Rust backend. It provides attempt history, best percentage and competition rank per quiz revision through `GET /api/v1/quizzes/{quiz_id}/my-results`.

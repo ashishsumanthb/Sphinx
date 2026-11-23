@@ -1,14 +1,13 @@
-# Insights component checklist
+# Insights integration checklist
 
-- [x] Parameterized member history with UUID IDs and timestamps.
-- [x] Parameterized best-score and revision rank query.
-- [x] Quiz access query with membership, eligibility, admin and deleted-team checks.
-- [x] SQLx repository, snapshot-consistent service and Axum route.
-- [x] Local fictional-identity demo and isolated design-schema fixtures.
-- [x] Actual PostgreSQL query assertions passed.
-- [x] Rust targets compiled, formatting and Clippy passed, two HTTP validation tests passed.
-- [x] Run instructions, peer walkthrough and conflict guidance.
-- [ ] Execute socket-backed database/API acceptance test locally.
-- [ ] Execute Docker/local live demo verification locally.
-- [ ] Reconcile team assignment, actual schema, response contract and auth adapter.
-- [ ] Review and push authorized changes to feat/insights.
+- [x] Use shared team_memberships and current eligibility/admin policy.
+- [x] Replace private schema definitions with real migration loading.
+- [x] Keep component as a workspace member and host path dependency.
+- [x] Reuse component core logic through the existing host route and session extractor.
+- [x] Keep host AppError and avoid mounting another router.
+- [x] Align all summary fields to highest attempted revision_no; add revision_results.
+- [x] Add host test for actual login, authorization, empty results, revisions and ties.
+- [x] Add explicit PostgreSQL CI/local verification commands.
+- [ ] Run the socket-backed host and component database tests locally/CI.
+- [ ] Confirm additive response contract and prerequisite quiz migration with teammates.
+- [ ] Review, commit and push integration to feat/insights.

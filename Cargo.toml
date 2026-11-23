@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+sphinx-insights = { path = "components/insights" }
 async-trait = "0.1"
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
@@ -21,3 +22,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+
+[workspace]
+members = ["components/insights"]
+resolver = "3"

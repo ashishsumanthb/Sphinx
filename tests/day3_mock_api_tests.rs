@@ -13,6 +13,7 @@ fn member_results_are_personal_and_revision_aware() {
         best_percentage: Some(100.0),
         revision_number: Some(2),
         rank: Some(1),
+        revision_results: vec![],
         attempts: vec![MyAttemptResponse {
             attempt_id: Uuid::new_v4(),
             quiz_id: Uuid::new_v4(),

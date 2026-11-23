@@ -47,11 +47,7 @@ BEGIN
     IF pg_temp.member_quiz_access(q,c) THEN
         RAISE EXCEPTION 'Removed membership should be denied';
     END IF;
-    UPDATE team_memberships
-    SET role = 'member'
-    WHERE team_id = '00000000-0000-4000-8000-000000000010'
-      AND user_id = '00000000-0000-4000-8000-000000000007';
-
+    UPDATE team_memberships SET role = 'member' WHERE user_id = '00000000-0000-4000-8000-000000000007';
     IF pg_temp.member_quiz_access(q,'00000000-0000-4000-8000-000000000007') THEN
         RAISE EXCEPTION 'Ineligible member should be denied after admin downgrade';
     END IF;

@@ -1,6 +1,16 @@
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use uuid::Uuid;
 
+pub fn schema_sql() -> String {
+    [
+        include_str!("../../../../migrations/001_identity_and_teams.sql"),
+        include_str!("../../../../migrations/002_rename_password_column.sql"),
+        include_str!("../../../../migrations/0020_quiz_schema.sql"),
+        include_str!("../../../../migrations/0030_participation.sql"),
+    ]
+    .join("\n")
+}
+
 pub fn id(n: u32) -> Uuid {
     Uuid::parse_str(&format!("00000000-0000-4000-8000-{n:012}")).unwrap()
 }
@@ -35,7 +45,7 @@ pub async fn fixture_pool() -> (PgPool, String) {
         .connect(&url)
         .await
         .unwrap();
-    sqlx::raw_sql(include_str!("schema.sql"))
+    sqlx::raw_sql(&schema_sql())
         .execute(&pool)
         .await
         .expect("apply design schema");

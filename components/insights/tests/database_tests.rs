@@ -90,9 +90,8 @@ async fn postgres_and_http_acceptance() {
     let result: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(result["attempts"].as_array().unwrap().len(), 1);
     assert_eq!(result["revision_results"][0]["rank"], 3);
-    // Removing membership denies access even when quiz eligibility remains.
-    sqlx::query("DELETE FROM team_memberships WHERE team_id = $1 AND user_id = $2")
-        .bind(support::id(10))
+    // Removed members lose read access even when eligibility remains.
+    sqlx::query("DELETE FROM team_memberships WHERE user_id = $1")
         .bind(support::id(3))
         .execute(&pool)
         .await

@@ -1,3 +1,29 @@
+# Host results contract
+
+Canonical production route: `GET /api/v1/quizzes/{quiz_id}/my-results`.
+The existing host handler uses the real login Bearer token through `session::AuthUser`.
+No public user_id parameter can select another member's results.
+
+The response preserves `quiz_id`, `best_score`, `best_percentage`, `revision_number`,
+`rank`, and `attempts`. It adds `revision_results`, ordered by revision number,
+with `quiz_revision_id`, `quiz_revision_number`, `best_percentage`, and `rank`.
+Summary fields refer to the highest revision_no attempted by the caller. All four
+summary fields are null if the authorized caller has no attempts; both arrays
+are empty. A later unattempted quiz revision does not change the summary.
+Ranks use exact numeric best percentages per participant/revision and competition
+ranking (1, 1, 3). All attempts are retained in history. The summary's best score
+is the raw score of the selected best-percentage attempt in that same revision.
+
+Membership plus eligibility is required, except that current team admins may
+retrieve their own results without eligibility. Missing and inaccessible quizzes
+both return the existing host AppError 404 NOT_FOUND envelope. Authentication
+failures retain the existing host session extractor's response.
+
+This contract is implemented atomically in the bundled DTO and repository change;
+it still needs teammate review before merging.
+
+## Standalone demo contract (not mounted in host)
+
 # Member results API contract
 
 ## Route and identity

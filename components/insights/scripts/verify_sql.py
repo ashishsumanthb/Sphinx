@@ -14,7 +14,8 @@ schema = "insights_verify_" + uuid.uuid4().hex
 rank_sql = (root / "sql/insights/member_revision_ranks.sql").read_text()
 history_sql = (root / "sql/insights/member_attempt_history.sql").read_text()
 sql = "BEGIN;\nCREATE SCHEMA " + schema + ";\nSET LOCAL search_path = " + schema + ";\n"
-sql += (root / "tests/support/schema.sql").read_text()
+for migration in sorted((root.parents[1] / "migrations").glob("*.sql"), key=lambda path: int(path.name.split("_", 1)[0])):
+    sql += migration.read_text() + "\n"
 sql += (root / "tests/support/fixtures.sql").read_text()
 sql += """
 CREATE FUNCTION pg_temp.member_revision_ranks(uuid, uuid)

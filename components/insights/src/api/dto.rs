@@ -14,7 +14,7 @@ pub struct AttemptResult {
     pub submitted_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct RevisionResult {
     pub quiz_revision_id: Uuid,
     pub quiz_revision_number: i32,

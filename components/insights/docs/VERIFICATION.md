@@ -1,25 +1,22 @@
-# Verification record
+# Integration verification
 
-Prepared on 22 November 2026 from the supplied design documents and the member ranking query pasted in the conversation. Scope is the independently runnable member-results Insights component. Full Member 4 UI/DevOps ownership is pending team confirmation.
+Prepared against developer d7445f9c7b78016b376a09204b01b075c756f699 and
+feat/insights b535a0d322d097a4d7695d11865b73ae1e8992f5.
 
-## Executed successfully
+- Root cargo test --all-targets: 23 passed, 3 database tests ignored.
+- Component API tests: 2 passed.
+- Canonical SQL assertions on PostgreSQL 16.2 single-user backend: passed with
+  real migrations. Single-user execution was necessary because this build
+  environment forbids TCP and Unix sockets.
+- New shared-schema host integration test: compiled, not executed here because
+  PostgreSQL sockets are unavailable. It must pass locally or in PostgreSQL 17 CI.
 
-- Rust 1.100.0 compiled the library, demo example and all test targets with the committed Cargo.lock.
-- cargo fmt --all -- --check passed.
-- cargo clippy --locked --all-targets -- -D warnings passed.
-- cargo test --locked --test api_tests passed both tests. Missing trusted identity is denied even with a fabricated x-user-id header, and malformed UUIDs return a structured error.
-- The generated SQL verification batch executed successfully using PostgreSQL 16.2 in single-user mode. It applied the full Sphinx design schema and UUID fixtures, loaded the actual three SQL query files, and completed all assertion checks. The output contained PASS: SQL assertions completed and no ERROR/FATAL messages.
-- SQL assertions cover best-of-two, ties (1,1,3), revision isolation, quiz isolation, fractions, zero scores, empty history, empty quizzes, eligible member access, outsiders, ineligible new members, admin access, removed membership and deleted teams.
-- Python scripts compiled and the shell verifier passed bash syntax checking.
+The new host test exercises real login/session extraction, eligible member,
+admin without eligibility, outsider, ineligible member, missing quiz, no attempts,
+competition ties, fractions/zero, revision-number ordering, summary consistency,
+caller identity isolation, membership removal and logout.
 
-## Requires local execution
+The local launcher runs this test explicitly and never runs the older ignored
+tests that reset the public schema. No remote branch has been pushed by this build.
 
-This workspace denied local TCP and Unix socket creation. The PostgreSQL-backed Rust HTTP acceptance test was compiled but could not be executed here. The loopback API, live curl checks, Docker Compose and PostgreSQL 17 image require the local commands in README.md. The standalone PostgreSQL SQL tests provide direct evidence for the query/schema/access behavior; the compiled integration test still needs to verify SQLx transport and response assembly in a normal environment.
-
-Run bash scripts/verify.sh with INSIGHTS_TEST_DATABASE_URL configured, then launch the demo and run python3 scripts/verify_http.py. Record those outcomes in your PR. Never mark the socket-backed tests as passed based on this record alone.
-
-## Integration decisions
-
-The library uses the design's layer paths within its own package to reduce conflicts. The loopback demo uses fictional bearer identities in an example-only adapter. Real JWT/session verification remains a host handoff. The response envelope and eligible-member/current-admin read policy are explicit implementation choices described in insights_api_contract.md. Shared route registration, state, auth integration and the actual team schema need peer review because the current private repository source was unavailable.
-
-Admin analytics, quiz CRUD, scoring/submission, a frontend, application deployment and production authentication are outside this member-results component. This record does not establish completion of the broader Member 4 roadmap.
+- Workspace Clippy: passed (`cargo clippy --locked --workspace --all-targets -- -D warnings`); existing unused async-trait manifest warning remains.

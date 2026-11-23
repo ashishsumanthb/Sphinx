@@ -1,45 +1,52 @@
-# Integration and Git conflict handling
+# Host integration
 
-## Verify the branch before introducing files
+The repository root is the supported integration target. `sphinx-insights` is a
+workspace member and a path dependency of `sphinx`. The existing host route in
+`src/api/routes.rs` is the only production registration of GET
+`/api/v1/quizzes/{quiz_id}/my-results`.
 
-Your known repository is /home/technoidentity/sphinx-work and your branch is feat/insights. Run these individually:
+The existing handler obtains `session::AuthUser.id`, calls the participation
+service/repository, then calls `sphinx_insights::results::my_results`. That shared
+operation checks membership plus eligibility/admin access, reads history and ranks
+within one read-only repeatable-read transaction. The host maps its typed errors
+into the existing `AppError`; no component HTTP error envelope or Extension
+identity is used by the host. Do not merge `build_router` into the host router.
+The component router and fictional tokens are retained only for the standalone demo.
 
-```bash
-cd /home/technoidentity/sphinx-work
-git status -sb
-git branch --show-current
-git fetch origin
-git diff --stat HEAD..origin/main
-```
+The host preserves the existing fields and adds `revision_results` (same revision
+DTO as the component). All summary fields use the caller's highest attempted
+`revision_no`, not timestamps and not the quiz's highest unattempted revision.
+The best attempt within that revision is selected by exact score/total ratio;
+equal ratios prefer the lowest attempt number, then UUID. An authorized caller
+with no attempts receives null summary fields and empty arrays. Ranking uses all
+participants' best percentages within each revision, with competition ranks
+1, 1, 3. Member access requires current team membership and quiz eligibility;
+current team admins can retrieve their own results without eligibility.
+Inaccessible/missing quizzes return the host's 404 NOT_FOUND envelope.
 
-Check your teammate-approved PR base. The old roadmap says developer, while the observed repository used main. Keep feat/insights and use the actual agreed integration branch. If you have uncommitted work, make a focused commit of files you intend to keep before syncing. Inspect untracked files explicitly; git diff does not show their contents.
+`migrations/0020_quiz_schema.sql` supplies the documented quiz prerequisite tables
+that migration 0030 already references. Identity/session/team definitions stay
+owned by migrations 001/002. Coordinate this new migration with the quiz owner
+before merging; if their equivalent migration lands, reconcile them rather than
+creating the tables twice. No existing migration is modified.
 
-The lowest-conflict approach is to add this source as a standalone path dependency under components/insights, retaining its internal src/, sql/, tests/ and docs/ layout. Choose a previously unused destination and extract there. If components/insights exists, compare files before copying. Your earlier sql/insights/member_revision_ranks.sql uses the same mathematical policy; this package adds UUID integration, revision number and HTTP support. Compare any existing route before introducing a second registration.
+Both component tests and host integration tests apply the real root migrations.
+No private identity/team schema is maintained. Component Cargo.lock is historical;
+the root workspace Cargo.lock is authoritative.
 
-## Shared app changes for peer review
+## Verification
 
-Add one Cargo path dependency named sphinx-insights pointing to components/insights and regenerate the shared lockfile with Cargo. The package is a library. Obtain the pool from the shared state, construct sphinx_insights::app_state::AppState with a pool clone, call sphinx_insights::build_router, and merge the returned router into the host router. These are coordinated edits to the shared manifest, lockfile and route setup.
+From the repository root on NixOS:
 
-Have the host's verified auth middleware insert sphinx_insights::api::AuthenticatedUser from its authenticated UUID. This middleware must wrap the mounted results route. The demo adapter stays confined to examples/demo.rs. Startup for the reusable library never invokes the fixture helper, Compose stack or schema DDL.
+    nix-shell -p python3 postgresql --run 'bash scripts/verify_insights_local.sh'
 
-Confirm the actual migration matches users, teams.deleted_at, team_members.role, quizzes.team_id, quiz_eligibilities, quiz_revisions.revision_no and quiz_attempts columns from the attached Sphinx DDL. Review the current membership/eligibility policy and global request IDs with the team. Run the host's test suite after merging and test real token expiry and team access through the normal login flow.
+The launcher creates and stops only its temporary PostgreSQL cluster. The new
+host test uses an additional UUID-named schema, real login requests and real
+session extraction. Existing destructive ignored PostgreSQL tests are not invoked.
+With an already isolated test database, set INSIGHTS_TEST_DATABASE_URL and run:
 
-If the team requires direct source integration, coordinate the design's existing src/repository/analytics.rs, src/services/analytics_service.rs and src/api/handlers/analytics.rs with their owners. Merge functions and DTOs into the existing modules and state/error types. Existing module declarations, manifest and root router require deliberate reconciliation. Retain one canonical copy of each SQL query and update include_str paths if moved.
+    bash scripts/verify_insights.sh
 
-## Review and push
-
-Stage explicit component paths only. Review the staged diff and run checks before committing. Example commands after you have copied the component to the new destination:
-
-```bash
-git add components/insights
-git diff --cached --stat
-git diff --cached --check
-git commit -m "feat(insights): add member results and revision ranking"
-git push origin feat/insights
-```
-
-Exclude target/, local credentials, downloaded archives and generated demo artifacts. The component's own .gitignore excludes its target folder.
-
-After protecting local work, merge the agreed integration base into feat/insights. If Git reports conflicts, run git status and git diff --name-only --diff-filter=U. Resolve one file at a time, preserve both teammates' required behavior, and ask the owner to review shared router/state changes. Regenerate Cargo.lock through Cargo after reconciling manifest dependencies. Stage resolved files and finish the merge only after format, Clippy, SQL tests and the host's tests pass. Avoid blanket ours/theirs resolution. Stop for explicit confirmation before discarding work, resetting commits or rewriting shared history. An ordinary push should be sufficient.
-
-The download was built independently from the supplied specifications and your pasted ranking query. Current private repository source and team auth changes were unavailable for review. This component is ready for local verification and peer review; compatibility with unseen changes must be checked in the host.
+CI `.github/workflows/insights.yml` runs the host and component checks on PostgreSQL
+17. The host DB test is explicitly run with `--ignored`; a normal successful
+root test run alone is not evidence that this database test passed.
