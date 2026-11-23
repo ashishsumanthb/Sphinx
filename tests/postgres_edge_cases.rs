@@ -1,11 +1,19 @@
 use std::time::Duration as StdDuration;
 
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
 use chrono::{Duration, Utc};
+use http_body_util::BodyExt;
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use sphinx::{
-    api::dto::AnswerInput,
+    AppState,
+    api::{dto::AnswerInput, routes::participation_routes},
     repository::participation::ParticipationRepository,
 };
+use tower::ServiceExt;
 use uuid::Uuid;
 
 const DEFAULT_DATABASE_URL: &str = "postgres://postgres:edgepass@127.0.0.1:55432/sphinx_edge";
@@ -88,6 +96,44 @@ async fn seed(pool: &PgPool, starts: chrono::DateTime<Utc>, ends: chrono::DateTi
     seed
 }
 
+async fn assert_logged_in_oversized_request_returns_413(pool: &PgPool, user_id: Uuid) {
+    let token = "ab".repeat(32);
+    let token_hash = Sha256::digest(token.as_bytes()).to_vec();
+    sqlx::query(
+        "INSERT INTO login_sessions(token_hash,user_id,expires_at)
+         VALUES($1,$2,clock_timestamp()+interval '1 hour')",
+    )
+    .bind(token_hash)
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!(
+            "/api/v1/attempt-sessions/{}/submit",
+            Uuid::new_v4()
+        ))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from("x".repeat(1024 * 1024 + 1)))
+        .unwrap();
+    let response = participation_routes()
+        .with_state(AppState { pool: pool.clone() })
+        .oneshot(request)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["error"]["code"], "PAYLOAD_TOO_LARGE");
+    assert!(json["error"]["request_id"]
+        .as_str()
+        .unwrap()
+        .starts_with("req_"));
+}
+
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL database; see docs/PARTICIPATION_API.md"]
 async fn postgres_edge_case_matrix() {
@@ -99,6 +145,7 @@ async fn postgres_edge_case_matrix() {
 
     // Start is inclusive; before start and at/after the exclusive end are rejected.
     let base = seed(&pool, Utc::now() + Duration::minutes(1), Utc::now() + Duration::minutes(2)).await;
+    assert_logged_in_oversized_request_returns_413(&pool, base.member).await;
     assert_eq!(repo.start_session(base.quiz, base.member).await.unwrap_err().code(), "QUIZ_NOT_AVAILABLE");
     sqlx::query("UPDATE quizzes SET starts_at=clock_timestamp(), ends_at=clock_timestamp()+interval '5 minutes' WHERE id=$1")
         .bind(base.quiz).execute(&pool).await.unwrap();
