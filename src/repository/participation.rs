@@ -444,33 +444,53 @@ impl ParticipationRepository {
         quiz_id: Uuid,
         user_id: Uuid,
     ) -> Result<MyResultsResponse, AppError> {
-        let attempts = self.my_attempts(quiz_id, user_id).await?;
-        let ranked = sqlx::query_as::<_, (i32, i64)>(
-            r#"WITH scores AS (
-                   SELECT a.user_id, r.revision_no,
-                          MAX(a.score::double precision / a.total_questions) AS ratio
-                   FROM quiz_attempts a JOIN quiz_revisions r ON r.id = a.quiz_revision_id
-                   WHERE a.quiz_id = $1 GROUP BY a.user_id, r.revision_no
-               ), ranked AS (
-                   SELECT *, RANK() OVER (PARTITION BY revision_no ORDER BY ratio DESC) AS rank
-                   FROM scores
-               ) SELECT revision_no, rank FROM ranked WHERE user_id = $2
-               ORDER BY revision_no DESC LIMIT 1"#,
-        )
-        .bind(quiz_id)
-        .bind(user_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        let best = attempts
+        let results = sphinx_insights::results::my_results(&self.pool, quiz_id, user_id)
+            .await
+            .map_err(|error| match error {
+                sphinx_insights::results::ResultsError::NotFound => AppError::not_found("Quiz"),
+                sphinx_insights::results::ResultsError::Database(error) => AppError::from(error),
+            })?;
+        // Revision number, never submission time or UUID, defines latest.
+        let latest = results
+            .revision_results
             .iter()
-            .max_by(|left, right| left.percentage.total_cmp(&right.percentage));
+            .max_by_key(|revision| revision.quiz_revision_number);
+        let best = latest.and_then(|revision| {
+            results
+                .attempts
+                .iter()
+                .filter(|attempt| attempt.quiz_revision_id == revision.quiz_revision_id)
+                .max_by(|left, right| {
+                    (i64::from(left.score) * i64::from(right.total_questions))
+                        .cmp(&(i64::from(right.score) * i64::from(left.total_questions)))
+                        .then_with(|| right.attempt_number.cmp(&left.attempt_number))
+                        .then_with(|| right.attempt_id.cmp(&left.attempt_id))
+                })
+        });
+        let best_score = best.map(|attempt| attempt.score as u32);
+        let best_percentage = best.map(|attempt| attempt.percentage);
+        let revision_number = latest.map(|revision| revision.quiz_revision_number as u32);
+        let rank = latest.map(|revision| revision.rank as u64);
         Ok(MyResultsResponse {
             quiz_id,
-            best_score: best.map(|attempt| attempt.score),
-            best_percentage: best.map(|attempt| attempt.percentage),
-            revision_number: ranked.map(|row| row.0 as u32),
-            rank: ranked.map(|row| row.1 as u64),
-            attempts,
+            best_score,
+            best_percentage,
+            revision_number,
+            rank,
+            attempts: results
+                .attempts
+                .into_iter()
+                .map(|attempt| MyAttemptResponse {
+                    attempt_id: attempt.attempt_id,
+                    quiz_id,
+                    attempt_number: attempt.attempt_number as u8,
+                    score: attempt.score as u32,
+                    total_questions: attempt.total_questions as u32,
+                    percentage: attempt.percentage,
+                    submitted_at: attempt.submitted_at,
+                })
+                .collect(),
+            revision_results: results.revision_results,
         })
     }
 

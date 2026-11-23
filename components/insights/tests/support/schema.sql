@@ -1,0 +1,3 @@
+-- Schema source: repository-root migrations/*.sql.
+-- Applied by support::schema_sql() and scripts/verify_sql.py.
+-- Do not introduce private table definitions here.
