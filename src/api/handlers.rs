@@ -11,7 +11,8 @@ use crate::{
         auth::AuthenticatedUser,
         dto::{
             AttemptSessionResponse, AvailableQuizListResponse, MyAttemptsResponse,
-            PublicQuestionResponse, SubmitAttemptRequest, SubmitAttemptResponse,
+            AttemptReviewResponse, MyResultsResponse, PublicQuestionResponse,
+            QuizAnalyticsResponse, SubmitAttemptRequest, SubmitAttemptResponse,
         },
         error::ApiResult,
     },
@@ -73,4 +74,28 @@ pub async fn my_attempts(
 ) -> ApiResult<Json<MyAttemptsResponse>> {
     let attempts = service(&state).my_attempts(quiz_id, auth.id).await?;
     Ok(Json(MyAttemptsResponse { attempts }))
+}
+
+pub async fn attempt_review(
+    State(state): State<AppState>,
+    auth: AuthenticatedUser,
+    Path(attempt_id): Path<Uuid>,
+) -> ApiResult<Json<AttemptReviewResponse>> {
+    Ok(Json(service(&state).attempt_review(attempt_id, auth.id).await?))
+}
+
+pub async fn my_results(
+    State(state): State<AppState>,
+    auth: AuthenticatedUser,
+    Path(quiz_id): Path<Uuid>,
+) -> ApiResult<Json<MyResultsResponse>> {
+    Ok(Json(service(&state).my_results(quiz_id, auth.id).await?))
+}
+
+pub async fn quiz_analytics(
+    State(state): State<AppState>,
+    auth: AuthenticatedUser,
+    Path(quiz_id): Path<Uuid>,
+) -> ApiResult<Json<QuizAnalyticsResponse>> {
+    Ok(Json(service(&state).quiz_analytics(quiz_id, auth.id).await?))
 }

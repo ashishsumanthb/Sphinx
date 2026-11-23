@@ -65,6 +65,22 @@ impl AppError {
         )
     }
 
+    pub fn payload_too_large() -> Self {
+        Self::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "PAYLOAD_TOO_LARGE",
+            "The request payload is too large",
+        )
+    }
+
+    pub fn database_unavailable() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "DB_UNAVAILABLE",
+            "The database is temporarily unavailable",
+        )
+    }
+
     pub fn code(&self) -> &'static str {
         self.code
     }
@@ -91,6 +107,9 @@ impl From<sqlx::Error> for AppError {
     fn from(error: sqlx::Error) -> Self {
         tracing::error!(%error, "participation database operation failed");
         match error {
+            sqlx::Error::PoolTimedOut | sqlx::Error::PoolClosed | sqlx::Error::Io(_) => {
+                Self::database_unavailable()
+            }
             sqlx::Error::RowNotFound => Self::not_found("Resource"),
             _ => Self::internal(),
         }
