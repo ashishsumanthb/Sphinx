@@ -143,6 +143,12 @@
             <p class="session-copy">Create and publish a quiz, take it, then show the saved result and revision-aware ranking.</p>
             <p class="identity-line">Your user ID: <code id="signed-in-user-id"></code> <button type="button" id="copy-user-id">Copy</button></p>
 
+            <div class="team-context">
+              <label class="field"><span>Current team</span><select id="team-context-select"><option value="">No team yet</option></select></label>
+              <div class="team-role"><small>YOUR ROLE</small><strong id="team-role-label">No membership</strong></div>
+              <button class="secondary-button compact-button" id="refresh-teams" type="button">Refresh</button>
+            </div>
+
             <nav class="workspace-tabs" aria-label="Sphinx workspace">
               <button class="workspace-tab is-active" type="button" data-workspace="studio">Admin studio</button>
               <button class="workspace-tab" type="button" data-workspace="play">Take quiz</button>
@@ -155,7 +161,7 @@
                 <span class="revision-badge">Real API workflow</span>
               </div>
               <div class="studio-grid">
-                <label class="field"><span>Team name</span><input id="demo-team-name" value="Presentation Team" maxlength="100" /></label>
+                <label class="field"><span>New team name <small>(used only when no admin team is selected)</small></span><input id="demo-team-name" value="Presentation Team" maxlength="100" /></label>
                 <label class="field"><span>Quiz title</span><input id="demo-quiz-title" value="Sphinx Launch Quiz" maxlength="150" /></label>
                 <label class="field builder-wide"><span>Eligible member user ID <small>(recommended for role demo)</small></span><input id="demo-member-id" placeholder="Register the member first, then paste their user UUID" /></label>
               </div>
@@ -185,7 +191,8 @@
                 <span class="revision-badge" id="play-availability">Waiting for quiz</span>
               </div>
               <div class="quiz-launch" id="quiz-launch">
-                <p>Paste the quiz ID shared by the admin. Your account must have been added before publication.</p>
+                <p id="available-copy">Select a team to load quizzes for which this account is eligible.</p>
+                <div class="available-quizzes" id="available-quizzes"></div>
                 <label class="field participant-quiz-id"><span>Published quiz ID</span><input id="play-quiz-id" placeholder="00000000-0000-0000-0000-000000000000" /></label>
                 <button class="primary-button workspace-action" id="start-demo-quiz" type="button" disabled><span>Start quiz</span><b aria-hidden="true">→</b></button>
               </div>

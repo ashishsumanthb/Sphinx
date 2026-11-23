@@ -36,8 +36,10 @@ const preparedQuestions = [
   }
 ];
 
-let demoWorkspace = restoreDemoWorkspace();
+let demoWorkspace = null;
 let activeAttempt = null;
+let teamMemberships = [];
+let selectedTeam = null;
 
 let mode = 'login';
 let session = restoreSession();
@@ -235,26 +237,102 @@ function showAuthenticated() {
   successState.classList.add('is-visible');
   document.querySelector('#signed-in-name').textContent = session.user.name.split(/\s+/)[0] || 'friend';
   document.querySelector('#signed-in-user-id').textContent = session.user.id;
+  demoWorkspace = restoreDemoWorkspace();
   renderPreparedQuestions();
   restoreDemoControls();
   switchWorkspace('studio');
-  configureRoleNavigation();
+  loadTeamContext();
 }
 
-async function configureRoleNavigation() {
+async function loadTeamContext(preferredTeamId = demoWorkspace?.teamId) {
   const studioTab = document.querySelector('[data-workspace="studio"]');
+  const select = document.querySelector('#team-context-select');
   try {
-    const teams = await apiRequest('/api/v1/teams', { token: session.token });
-    const hasAdminRole = teams.some((team) => team.role === 'admin');
-    const isMemberOnly = teams.length > 0 && !hasAdminRole;
-    studioTab.classList.toggle('is-hidden', isMemberOnly);
-    if (isMemberOnly) {
+    teamMemberships = await apiRequest('/api/v1/teams', { token: session.token });
+    select.replaceChildren();
+    if (!teamMemberships.length) {
+      select.append(new Option('No team yet — create one in Admin studio', ''));
+      selectedTeam = null;
+      studioTab.classList.remove('is-hidden');
+      document.querySelector('#team-role-label').textContent = 'No membership';
+      renderAvailableQuizzes([]);
+      return;
+    }
+    teamMemberships.forEach((team) => select.append(new Option(`${team.name} · ${team.role}`, team.id)));
+    const storedTeamId = window.localStorage.getItem('sphinx.selected-team');
+    select.value = teamMemberships.some((team) => team.id === preferredTeamId)
+      ? preferredTeamId
+      : teamMemberships.some((team) => team.id === storedTeamId) ? storedTeamId : teamMemberships[0].id;
+    selectedTeam = teamMemberships.find((team) => team.id === select.value);
+    applySelectedTeamRole();
+    if (selectedTeam.role !== 'admin') {
       switchWorkspace('play');
       showToast('Member access: take eligible quizzes and view your results.');
     }
   } catch (error) {
     showToast(`Could not load team roles: ${error.message}`);
   }
+}
+
+function applySelectedTeamRole() {
+  const studioTab = document.querySelector('[data-workspace="studio"]');
+  const isAdmin = selectedTeam?.role === 'admin';
+  studioTab.classList.toggle('is-hidden', !isAdmin);
+  document.querySelector('#team-role-label').textContent = selectedTeam
+    ? selectedTeam.role === 'admin' ? 'Team administrator' : 'Team member'
+    : 'No membership';
+  if (!isAdmin && document.querySelector('#studio-workspace').classList.contains('is-hidden') === false) {
+    switchWorkspace('play');
+  }
+  if (selectedTeam) {
+    window.localStorage.setItem('sphinx.selected-team', selectedTeam.id);
+    loadAvailableQuizzes(selectedTeam.id);
+  } else {
+    renderAvailableQuizzes([]);
+  }
+}
+
+document.querySelector('#team-context-select').addEventListener('change', (event) => {
+  selectedTeam = teamMemberships.find((team) => team.id === event.target.value) || null;
+  applySelectedTeamRole();
+});
+
+document.querySelector('#refresh-teams').addEventListener('click', () => loadTeamContext(selectedTeam?.id));
+
+async function loadAvailableQuizzes(teamId) {
+  const copy = document.querySelector('#available-copy');
+  copy.textContent = 'Loading eligible quizzes…';
+  try {
+    const response = await apiRequest(`/api/v1/teams/${teamId}/quizzes/available`, { token: session.token });
+    renderAvailableQuizzes(response.quizzes || []);
+    copy.textContent = response.quizzes?.length
+      ? 'Choose an open quiz from this team.'
+      : 'No eligible open quizzes are available for this team.';
+  } catch (error) {
+    renderAvailableQuizzes([]);
+    copy.textContent = error.message;
+  }
+}
+
+function renderAvailableQuizzes(quizzes) {
+  const container = document.querySelector('#available-quizzes');
+  container.replaceChildren();
+  quizzes.forEach((quiz) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'available-quiz';
+    const title = document.createElement('strong');
+    title.textContent = quiz.title;
+    const detail = document.createElement('small');
+    detail.textContent = `Open until ${new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(quiz.ends_at))}`;
+    button.append(title, detail);
+    button.addEventListener('click', () => {
+      document.querySelector('#play-quiz-id').value = quiz.id;
+      updateStartAvailability();
+      document.querySelector('#play-availability').textContent = 'Eligible · open';
+    });
+    container.append(button);
+  });
 }
 
 document.querySelector('#copy-user-id').addEventListener('click', async () => {
@@ -279,7 +357,7 @@ function showLogin() {
 
 function restoreDemoWorkspace() {
   try {
-    return JSON.parse(window.localStorage.getItem(DEMO_KEY)) || null;
+    return JSON.parse(window.localStorage.getItem(demoStorageKey())) || null;
   } catch {
     return null;
   }
@@ -287,7 +365,11 @@ function restoreDemoWorkspace() {
 
 function saveDemoWorkspace(value) {
   demoWorkspace = value;
-  window.localStorage.setItem(DEMO_KEY, JSON.stringify(value));
+  window.localStorage.setItem(demoStorageKey(), JSON.stringify(value));
+}
+
+function demoStorageKey() {
+  return session?.user?.id ? `${DEMO_KEY}.${session.user.id}` : DEMO_KEY;
 }
 
 function switchWorkspace(name) {
@@ -374,16 +456,21 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
   const teamName = document.querySelector('#demo-team-name').value.trim();
   const title = document.querySelector('#demo-quiz-title').value.trim();
   const memberId = document.querySelector('#demo-member-id').value.trim();
-  if (!teamName || !title) {
-    showToast('Enter a team name and quiz title.');
+  const canUseSelectedTeam = selectedTeam?.role === 'admin';
+  if ((!canUseSelectedTeam && !teamName) || !title) {
+    showToast('Select an admin team or enter a new team name, then enter a quiz title.');
     return;
   }
   button.disabled = true;
-  label.textContent = 'Creating team…';
+  label.textContent = canUseSelectedTeam ? 'Using admin team…' : 'Creating team…';
   try {
-    const team = await apiRequest('/api/v1/teams', {
-      method: 'POST', token: session.token, body: { name: teamName }
-    });
+    let team = selectedTeam;
+    if (!canUseSelectedTeam) {
+      team = await apiRequest('/api/v1/teams', {
+        method: 'POST', token: session.token, body: { name: teamName }
+      });
+      await loadTeamContext(team.id);
+    }
     if (memberId) {
       label.textContent = 'Adding eligible member…';
       await apiRequest(`/api/v1/teams/${team.id}/members`, {
@@ -407,6 +494,7 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
     });
     saveDemoWorkspace({ teamId: team.id, quizId: quiz.id, title });
     restoreDemoControls();
+    await loadAvailableQuizzes(team.id);
     if (memberId) {
       showToast('Quiz published. Share the quiz ID with the eligible member.');
     } else {
