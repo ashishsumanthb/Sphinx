@@ -5,10 +5,10 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    if let Err(error) = dotenvy::dotenv() {
-        if !error.not_found() {
-            return Err(error.into());
-        }
+    if let Err(error) = dotenvy::dotenv()
+        && !error.not_found()
+    {
+        return Err(error.into());
     }
 
     let database_options = PgConnectOptions::new()

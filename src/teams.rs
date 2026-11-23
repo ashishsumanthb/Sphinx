@@ -170,7 +170,7 @@ async fn add_member(
     }
 
     require_admin(
-        &mut *transaction,
+        &mut transaction,
         team_id,
         user.id,
         "Only team admins can add members",
@@ -232,7 +232,7 @@ async fn list_members(
 
     let mut transaction = state.pool.begin().await.map_err(list_members_error)?;
 
-    require_member(&mut *transaction, team_id, user.id).await?;
+    require_member(&mut transaction, team_id, user.id).await?;
 
     let rows = sqlx::query_as::<_, (Uuid, String, String)>(
         "SELECT users.id, users.name, team_memberships.role

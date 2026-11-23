@@ -12,6 +12,12 @@ Identity and teams functionality includes:
 - Creating and listing teams.
 - Adding and listing team members.
 - Shared membership and admin permission checks.
+- Eligible quiz discovery and revision-pinned attempt sessions.
+- Deterministic scoring, atomic persistence and idempotent retries.
+- Safe public questions and personal attempt retrieval.
+
+See [`docs/PARTICIPATION_API.md`](docs/PARTICIPATION_API.md) for participation
+routes, security rules, database dependencies and integration notes.
 
 The team creator becomes an admin. Added users receive the member role.
 
@@ -109,5 +115,5 @@ been checked manually through the API.
   the refactor.
 - Role-changing and member-removal endpoints are outside the
   current smaller implementation.
-- Full quiz functionality requires integration with the other
-  project modules.
+- Quiz participation requires the upstream quiz, revision, question and
+  eligibility migrations described in the participation API documentation.

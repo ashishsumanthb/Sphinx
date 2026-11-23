@@ -1,3 +1,7 @@
+pub mod api;
+pub mod domain;
+pub mod repository;
+pub mod services;
 pub mod auth;
 pub mod password;
 pub(crate) mod permissions;
@@ -31,5 +35,6 @@ pub fn app(state: AppState) -> Router {
         .route("/health/live", get(health))
         .nest("/api/v1/auth", auth::routes())
         .nest("/api/v1/teams", teams::routes())
+        .merge(api::routes::participation_routes())
         .with_state(state)
 }
