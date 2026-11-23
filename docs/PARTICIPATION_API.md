@@ -89,7 +89,7 @@ production database.
 
 ## Integration dependencies
 
-- Member 1: `users`, `team_members`, and authenticated-user middleware.
+- Member 1: `users`, `team_memberships`, and authenticated-user middleware.
 - Member 2: `quizzes`, `quiz_revisions`, `question_versions`, and the
   `quiz_eligibilities` snapshot.
 - Member 4: reads committed attempts; it must not recompute saved scores.
