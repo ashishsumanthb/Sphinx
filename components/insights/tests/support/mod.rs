@@ -5,7 +5,7 @@ pub fn schema_sql() -> String {
     [
         include_str!("../../../../migrations/001_identity_and_teams.sql"),
         include_str!("../../../../migrations/002_rename_password_column.sql"),
-        include_str!("../../../../migrations/0020_quiz_schema.sql"),
+        include_str!("../../../../migrations/0020_quiz_management.sql"),
         include_str!("../../../../migrations/0030_participation.sql"),
     ]
     .join("\n")
