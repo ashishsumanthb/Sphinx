@@ -11,35 +11,35 @@ use crate::{AppState, api::handlers};
 pub fn participation_routes() -> Router<AppState> {
     Router::new()
         .route(
-            "/api/v1/teams/:team_id/quizzes/available",
+            "/api/v1/teams/{team_id}/quizzes/available",
             get(handlers::list_available_quizzes),
         )
         .route(
-            "/api/v1/quizzes/:quiz_id/attempt-sessions",
+            "/api/v1/quizzes/{quiz_id}/attempt-sessions",
             post(handlers::start_attempt_session),
         )
         .route(
-            "/api/v1/attempt-sessions/:session_id/questions",
+            "/api/v1/attempt-sessions/{session_id}/questions",
             get(handlers::get_session_questions),
         )
         .route(
-            "/api/v1/attempt-sessions/:session_id/submit",
+            "/api/v1/attempt-sessions/{session_id}/submit",
             post(handlers::submit_attempt),
         )
         .route(
-            "/api/v1/quizzes/:quiz_id/my-attempts",
+            "/api/v1/quizzes/{quiz_id}/my-attempts",
             get(handlers::my_attempts),
         )
         .route(
-            "/api/v1/attempts/:attempt_id/review",
+            "/api/v1/attempts/{attempt_id}/review",
             get(handlers::attempt_review),
         )
         .route(
-            "/api/v1/quizzes/:quiz_id/my-results",
+            "/api/v1/quizzes/{quiz_id}/my-results",
             get(handlers::my_results),
         )
         .route(
-            "/api/v1/quizzes/:quiz_id/analytics",
+            "/api/v1/quizzes/{quiz_id}/analytics",
             get(handlers::quiz_analytics),
         )
         .layer(DefaultBodyLimit::max(1024 * 1024))

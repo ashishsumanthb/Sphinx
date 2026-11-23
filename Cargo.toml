@@ -1,18 +1,20 @@
 [package]
-name = "standuppulse"
+name = "sphinx"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 async-trait = "0.1"
-axum = "0.7"
+axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
 hex = "0.4"
+rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "uuid", "chrono", "json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["serde", "v4"] }
 

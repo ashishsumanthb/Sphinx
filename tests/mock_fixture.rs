@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use standuppulse::{
+use sphinx::{
     api::dto::{
         AttemptSessionResponse, AvailableQuizListResponse, MyAttemptsResponse,
         SubmitAttemptRequest, SubmitAttemptResponse,
