@@ -3,7 +3,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use sqlx::postgres::PgPoolOptions;
-use standuppulse::{
+use sphinx::{
     AppState,
     api::{dto::PublicQuestionResponse, routes::participation_routes},
 };

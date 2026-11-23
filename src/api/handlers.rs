@@ -29,7 +29,7 @@ pub async fn list_available_quizzes(
     Path(team_id): Path<Uuid>,
 ) -> ApiResult<Json<AvailableQuizListResponse>> {
     let quizzes = service(&state)
-        .list_available(team_id, auth.user_id)
+        .list_available(team_id, auth.id)
         .await?;
     Ok(Json(AvailableQuizListResponse { quizzes }))
 }
@@ -39,7 +39,7 @@ pub async fn start_attempt_session(
     auth: AuthenticatedUser,
     Path(quiz_id): Path<Uuid>,
 ) -> ApiResult<(StatusCode, Json<AttemptSessionResponse>)> {
-    let session = service(&state).start_session(quiz_id, auth.user_id).await?;
+    let session = service(&state).start_session(quiz_id, auth.id).await?;
     Ok((StatusCode::CREATED, Json(session)))
 }
 
@@ -49,7 +49,7 @@ pub async fn get_session_questions(
     Path(session_id): Path<Uuid>,
 ) -> ApiResult<Json<Vec<PublicQuestionResponse>>> {
     let questions = service(&state)
-        .session_questions(session_id, auth.user_id)
+        .session_questions(session_id, auth.id)
         .await?;
     Ok(Json(questions))
 }
@@ -61,7 +61,7 @@ pub async fn submit_attempt(
     Json(request): Json<SubmitAttemptRequest>,
 ) -> ApiResult<Json<SubmitAttemptResponse>> {
     let result = service(&state)
-        .submit(session_id, auth.user_id, &request.answers)
+        .submit(session_id, auth.id, &request.answers)
         .await?;
     Ok(Json(result))
 }
@@ -71,6 +71,6 @@ pub async fn my_attempts(
     auth: AuthenticatedUser,
     Path(quiz_id): Path<Uuid>,
 ) -> ApiResult<Json<MyAttemptsResponse>> {
-    let attempts = service(&state).my_attempts(quiz_id, auth.user_id).await?;
+    let attempts = service(&state).my_attempts(quiz_id, auth.id).await?;
     Ok(Json(MyAttemptsResponse { attempts }))
 }
