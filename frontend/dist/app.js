@@ -40,8 +40,10 @@ let demoWorkspace = null;
 let activeAttempt = null;
 let teamMemberships = [];
 let selectedTeam = null;
+let teamMembers = [];
 let teamContextRequest = 0;
 let availableQuizzesRequest = 0;
+let teamMembersRequest = 0;
 
 let mode = 'login';
 let session = restoreSession();
@@ -119,6 +121,7 @@ function validate() {
 }
 
 function errorMessage(payload, fallback) {
+  if (typeof payload === 'string' && payload.trim()) return payload.trim();
   if (typeof payload?.error === 'string') return payload.error;
   if (typeof payload?.error?.message === 'string') return payload.error.message;
   return fallback;
@@ -146,7 +149,7 @@ async function apiRequest(path, { method = 'GET', body, token } = {}) {
     try {
       payload = JSON.parse(text);
     } catch {
-      payload = null;
+      payload = text;
     }
   }
 
@@ -302,10 +305,77 @@ function applySelectedTeamRole() {
   if (selectedTeam) {
     window.localStorage.setItem(selectedTeamStorageKey(), selectedTeam.id);
     loadAvailableQuizzes(selectedTeam.id);
+    if (isAdmin) loadTeamMembers(selectedTeam.id);
+    else renderTeamMembers([]);
   } else {
     renderAvailableQuizzes([]);
+    renderTeamMembers([]);
   }
 }
+
+async function loadTeamMembers(teamId) {
+  const requestId = ++teamMembersRequest;
+  document.querySelector('#participant-copy').textContent = 'Loading team members…';
+  try {
+    const response = await apiRequest(`/api/v1/teams/${teamId}/members`, { token: session.token });
+    if (requestId !== teamMembersRequest || selectedTeam?.id !== teamId) return;
+    teamMembers = (Array.isArray(response) ? response : []).filter((member) => member.role === 'member');
+    renderTeamMembers(teamMembers);
+  } catch (error) {
+    if (requestId !== teamMembersRequest) return;
+    teamMembers = [];
+    renderTeamMembers([]);
+    document.querySelector('#participant-copy').textContent = error.message;
+  }
+}
+
+function renderTeamMembers(members) {
+  const container = document.querySelector('#participant-grid');
+  container.replaceChildren();
+  if (!members.length) {
+    const empty = document.createElement('p');
+    empty.className = 'result-empty';
+    empty.textContent = 'No members are available. Run the demo seed before presenting.';
+    container.append(empty);
+    document.querySelector('#participant-copy').textContent = '0 members selected';
+    return;
+  }
+  members.forEach((member) => {
+    const label = document.createElement('label');
+    label.className = 'participant-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = member.user_id;
+    input.checked = true;
+    input.addEventListener('change', updateParticipantCount);
+    const initials = document.createElement('span');
+    initials.className = 'participant-avatar';
+    initials.textContent = member.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+    const copy = document.createElement('span');
+    const name = document.createElement('strong');
+    name.textContent = member.name;
+    const role = document.createElement('small');
+    role.textContent = 'Team member';
+    copy.append(name, role);
+    label.append(input, initials, copy);
+    container.append(label);
+  });
+  updateParticipantCount();
+}
+
+function selectedParticipantIds() {
+  return [...document.querySelectorAll('#participant-grid input:checked')].map((input) => input.value);
+}
+
+function updateParticipantCount() {
+  const selected = selectedParticipantIds().length;
+  document.querySelector('#participant-copy').textContent = `${selected} of ${teamMembers.length} members selected`;
+}
+
+document.querySelector('#select-all-participants').addEventListener('click', () => {
+  document.querySelectorAll('#participant-grid input').forEach((input) => { input.checked = true; });
+  updateParticipantCount();
+});
 
 document.querySelector('#team-context-select').addEventListener('change', (event) => {
   selectedTeam = teamMemberships.find((team) => team.id === event.target.value) || null;
@@ -366,8 +436,10 @@ document.querySelector('#copy-user-id').addEventListener('click', async () => {
 function showLogin() {
   teamContextRequest += 1;
   availableQuizzesRequest += 1;
+  teamMembersRequest += 1;
   teamMemberships = [];
   selectedTeam = null;
+  teamMembers = [];
   successState.classList.remove('is-visible');
   resultsView.classList.add('is-hidden');
   authWrap.classList.remove('results-mode');
@@ -440,7 +512,7 @@ function renderPreparedQuestions() {
   document.querySelector('#prepared-count').textContent = `${preparedQuestions.length} questions`;
 }
 
-document.querySelector('#add-custom-question').addEventListener('click', () => {
+document.querySelector('#add-custom-question').addEventListener('click', async (event) => {
   const question = document.querySelector('#custom-question').value.trim();
   const optionA = document.querySelector('#custom-option-a').value.trim();
   const optionB = document.querySelector('#custom-option-b').value.trim();
@@ -448,17 +520,44 @@ document.querySelector('#add-custom-question').addEventListener('click', () => {
     showToast('Enter a question and both answer options.');
     return;
   }
-  preparedQuestions.push({
+  const draft = {
     question_text: question,
     options: [optionA, optionB],
-    correct_option_index: Number(document.querySelector('#custom-correct').value),
+    correct_option_index: Number(document.querySelector('#custom-correct').value)
+  };
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await apiRequest('/questions/validate', { method: 'POST', token: session.token, body: draft });
+  } catch (error) {
+    showToast(error.message);
+    button.disabled = false;
+    return;
+  }
+  preparedQuestions.push({
+    ...draft,
     explanation: document.querySelector('#custom-explanation').value.trim() || 'Prepared by the quiz administrator.'
   });
   ['custom-question', 'custom-option-a', 'custom-option-b', 'custom-explanation']
     .forEach((id) => { document.querySelector(`#${id}`).value = ''; });
   renderPreparedQuestions();
-  showToast('Question added to the prepared set.');
+  button.disabled = false;
+  showToast('Question validated by Rust and added to the quiz.');
 });
+
+async function validatePreparedQuestions() {
+  for (const question of preparedQuestions) {
+    await apiRequest('/questions/validate', {
+      method: 'POST',
+      token: session.token,
+      body: {
+        question_text: question.question_text,
+        options: question.options,
+        correct_option_index: question.correct_option_index
+      }
+    });
+  }
+}
 
 function setWorkflowStatus(message, kind = '') {
   const status = document.querySelector('#workflow-status');
@@ -500,14 +599,17 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
   const label = button.querySelector('span');
   const teamName = document.querySelector('#demo-team-name').value.trim();
   const title = document.querySelector('#demo-quiz-title').value.trim();
-  const memberId = document.querySelector('#demo-member-id').value.trim();
+  const description = document.querySelector('#demo-quiz-description').value.trim();
+  const maxAttempts = Number(document.querySelector('#demo-max-attempts').value);
+  const durationMinutes = Number(document.querySelector('#demo-duration').value);
+  const participantIds = selectedParticipantIds();
   const canUseSelectedTeam = selectedTeam?.role === 'admin';
   if ((!canUseSelectedTeam && !teamName) || !title) {
     showToast('Select an admin team or enter a new team name, then enter a quiz title.');
     return;
   }
-  if (memberId && !isUuid(memberId)) {
-    showToast('Enter a valid member user ID, or leave it blank.');
+  if (!participantIds.length) {
+    showToast('Select at least one team member for this quiz.');
     return;
   }
   button.disabled = true;
@@ -515,22 +617,22 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
   let team = selectedTeam;
   let quiz = null;
   try {
+    label.textContent = 'Validating questions…';
+    await validatePreparedQuestions();
     if (!canUseSelectedTeam) {
       team = await apiRequest('/api/v1/teams', {
         method: 'POST', token: session.token, body: { name: teamName }
       });
       await loadTeamContext(team.id);
     }
-    if (memberId) {
-      label.textContent = 'Adding eligible member…';
-      await apiRequest(`/api/v1/teams/${team.id}/members`, {
-        method: 'POST', token: session.token, body: { user_id: memberId }
-      });
-    }
     label.textContent = 'Creating quiz…';
     quiz = await apiRequest(`/api/v1/teams/${team.id}/quizzes`, {
       method: 'POST', token: session.token,
-      body: { title, description: 'Prepared for the Sphinx presentation demo', max_attempts: 2 }
+      body: { title, description: description || null, max_attempts: maxAttempts }
+    });
+    label.textContent = `Assigning ${participantIds.length} members…`;
+    await apiRequest(`/api/v1/quizzes/${quiz.id}/eligibilities`, {
+      method: 'PUT', token: session.token, body: { user_ids: participantIds }
     });
     for (let index = 0; index < preparedQuestions.length; index += 1) {
       label.textContent = `Posting question ${index + 1}/${preparedQuestions.length}…`;
@@ -540,24 +642,20 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
     }
     label.textContent = 'Publishing…';
     await apiRequest(`/api/v1/quizzes/${quiz.id}/publish`, {
-      method: 'POST', token: session.token, body: { duration_minutes: 15 }
+      method: 'POST', token: session.token, body: { duration_minutes: durationMinutes }
     });
     saveDemoWorkspace({ teamId: team.id, quizId: quiz.id, title });
     restoreDemoControls();
     await loadAvailableQuizzes(team.id);
-    if (memberId) {
-      showToast('Quiz published. Share the quiz ID with the eligible member.');
-    } else {
-      switchWorkspace('play');
-      showToast('Quiz published. The admin account can also start it as an eligible team member.');
-    }
+    setWorkflowStatus(`Published “${title}” for ${participantIds.length} members. Quiz ID: ${quiz.id}`, 'is-success');
+    showToast('Quiz published. Log in as a member to take it.');
   } catch (error) {
     const retained = quiz ? ` Draft quiz ${quiz.id} was retained for inspection.` : '';
     setWorkflowStatus(`${error.message}${retained}`, 'is-error');
     showToast(error.message);
   } finally {
     button.disabled = false;
-    label.textContent = 'Create team, quiz & publish';
+    label.textContent = 'Create quiz, assign members & publish';
   }
 });
 

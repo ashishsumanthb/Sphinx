@@ -257,6 +257,17 @@ input::placeholder { color: #a7afa9; }
 .workspace-heading h3 { margin: 4px 0 0; font: 800 21px "Manrope", sans-serif; letter-spacing: -.03em; }
 .studio-grid, .builder-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .prepared-header { margin: 22px 0 10px; }
+.participant-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 22px 0 10px; }
+.participant-header strong, .participant-header small { display: block; }
+.participant-header small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.participant-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.participant-option { display: grid; grid-template-columns: auto 32px 1fr; align-items: center; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: white; cursor: pointer; }
+.participant-option:has(input:checked) { border-color: #b5a4ec; background: #f4f0ff; }
+.participant-option input { accent-color: var(--primary); }
+.participant-avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; background: var(--primary); color: white; font-size: 9px; font-weight: 800; }
+.participant-option strong, .participant-option small { display: block; }
+.participant-option strong { font-size: 10px; }
+.participant-option small { margin-top: 2px; color: var(--muted); font-size: 8px; }
 .prepared-header strong, .prepared-header small { display: block; }
 .prepared-header small { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .prepared-header > span { color: var(--primary); font-size: 10px; font-weight: 800; }
@@ -352,7 +363,7 @@ input::placeholder { color: #a7afa9; }
   .result-summary { grid-template-columns: 1fr; }
   .result-row { grid-template-columns: 1fr auto; }
   .result-row .result-detail { grid-column: 1 / -1; }
-  .workspace-tabs, .studio-grid, .builder-grid, .team-context { grid-template-columns: 1fr; }
+  .workspace-tabs, .studio-grid, .builder-grid, .team-context, .participant-grid { grid-template-columns: 1fr; }
   .builder-wide { grid-column: auto; }
   .workspace-heading { align-items: flex-start; flex-direction: column; }
 }

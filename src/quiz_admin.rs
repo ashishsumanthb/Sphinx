@@ -71,9 +71,123 @@ pub(crate) fn routes() -> Router<AppState> {
         )
         .route("/api/v1/quizzes/{quiz_id}/publish", post(publish_quiz))
         .route(
+            "/api/v1/quizzes/{quiz_id}/eligibilities",
+            put(set_quiz_eligibilities),
+        )
+        .route(
             "/api/v1/quizzes/{quiz_id}/close",
             post(close_published_quiz),
         )
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetQuizEligibilitiesRequest {
+    user_ids: Vec<Uuid>,
+}
+
+#[derive(Serialize)]
+struct QuizEligibilitiesResponse {
+    quiz_id: Uuid,
+    user_ids: Vec<Uuid>,
+}
+
+async fn set_quiz_eligibilities(
+    State(state): State<AppState>,
+    user: AuthUser,
+    path: Result<Path<Uuid>, PathRejection>,
+    payload: Result<Json<SetQuizEligibilitiesRequest>, JsonRejection>,
+) -> Result<Json<QuizEligibilitiesResponse>, ApiError> {
+    let Path(quiz_id) = path.map_err(invalid_path)?;
+    let Json(request) = payload.map_err(invalid_json)?;
+
+    if request.user_ids.is_empty() {
+        return Err(api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Select at least one quiz participant",
+        ));
+    }
+
+    let mut user_ids = request.user_ids;
+    user_ids.sort_unstable();
+    user_ids.dedup();
+
+    let mut tx = state.pool.begin().await.map_err(eligibility_db_error)?;
+    let team_id = sqlx::query_scalar::<_, Uuid>("SELECT team_id FROM quizzes WHERE id = $1")
+        .bind(quiz_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(eligibility_db_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Quiz not found"))?;
+
+    require_admin(
+        &mut tx,
+        team_id,
+        user.id,
+        "Only a team admin can assign quiz participants",
+    )
+    .await
+    .map_err(permission_error)?;
+
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM quizzes WHERE id = $1 AND team_id = $2 FOR UPDATE",
+    )
+    .bind(quiz_id)
+    .bind(team_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(eligibility_db_error)?;
+
+    if status != "draft" {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            "Participants can only be assigned to a draft quiz",
+        ));
+    }
+
+    let member_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM team_memberships
+         WHERE team_id = $1 AND user_id = ANY($2) AND role = 'member'",
+    )
+    .bind(team_id)
+    .bind(&user_ids)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(eligibility_db_error)?;
+
+    if member_count != user_ids.len() as i64 {
+        return Err(api_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Every participant must be a member of the quiz team",
+        ));
+    }
+
+    sqlx::query("DELETE FROM quiz_eligibilities WHERE quiz_id = $1")
+        .bind(quiz_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(eligibility_db_error)?;
+
+    sqlx::query(
+        "INSERT INTO quiz_eligibilities (quiz_id, user_id)
+         SELECT $1, unnest($2::uuid[])",
+    )
+    .bind(quiz_id)
+    .bind(&user_ids)
+    .execute(&mut *tx)
+    .await
+    .map_err(eligibility_db_error)?;
+
+    tx.commit().await.map_err(eligibility_db_error)?;
+
+    Ok(Json(QuizEligibilitiesResponse { quiz_id, user_ids }))
+}
+
+fn eligibility_db_error(_: sqlx::Error) -> ApiError {
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to assign quiz participants",
+    )
 }
 #[derive(Deserialize)]
 struct AddQuestionRequest {
@@ -402,19 +516,29 @@ async fn publish_quiz(
         .map_err(publish_db_error)?;
     }
 
-    let eligible_users = sqlx::query(
+    sqlx::query(
         "INSERT INTO quiz_eligibilities (quiz_id, user_id)
          SELECT $1, user_id
          FROM team_memberships
          WHERE team_id = $2
+           AND role = 'member'
+           AND NOT EXISTS (
+               SELECT 1 FROM quiz_eligibilities WHERE quiz_id = $1
+           )
          ON CONFLICT (quiz_id, user_id) DO NOTHING",
     )
     .bind(quiz_id)
     .bind(team_id)
     .execute(&mut *tx)
     .await
-    .map_err(publish_db_error)?
-    .rows_affected();
+    .map_err(publish_db_error)?;
+
+    let eligible_users =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM quiz_eligibilities WHERE quiz_id = $1")
+            .bind(quiz_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(publish_db_error)?;
 
     sqlx::query(
         "UPDATE quizzes
@@ -442,7 +566,12 @@ async fn publish_quiz(
             status: String::from("open"),
             starts_at,
             ends_at,
-            eligible_users,
+            eligible_users: u64::try_from(eligible_users).map_err(|_| {
+                api_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Quiz eligibility count is invalid",
+                )
+            })?,
         }),
     ))
 }

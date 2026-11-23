@@ -93,6 +93,7 @@ async fn host_routes_preserve_authentication_errors_before_parsing_requests() {
             format!("/api/v1/teams/{id}/quizzes/{id}/questions/{id}"),
         ),
         ("POST", format!("/api/v1/quizzes/{id}/publish")),
+        ("PUT", format!("/api/v1/quizzes/{id}/eligibilities")),
         ("POST", format!("/api/v1/quizzes/{id}/close")),
     ];
     let app = app(test_state());

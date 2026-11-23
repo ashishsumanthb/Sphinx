@@ -171,7 +171,7 @@ async fn quiz_management_api_is_transactional_and_revision_safe() {
 
     let app = app(AppState { pool: pool.clone() });
 
-    let _admin_id = register_user(
+    let admin_id = register_user(
         app.clone(),
         "Quiz Admin",
         "quiz-admin-postgres@example.com",
@@ -298,6 +298,48 @@ async fn quiz_management_api_is_transactional_and_revision_safe() {
     assert_eq!(status, StatusCode::CREATED);
 
     let quiz_id = Uuid::parse_str(response["id"].as_str().unwrap()).unwrap();
+
+    let eligibility_uri = format!("/api/v1/quizzes/{quiz_id}/eligibilities");
+    let (status, _) = call(
+        app.clone(),
+        Method::PUT,
+        &eligibility_uri,
+        Some(&member_token),
+        Some(json!({ "user_ids": [member_id] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = call(
+        app.clone(),
+        Method::PUT,
+        &eligibility_uri,
+        Some(&admin_token),
+        Some(json!({ "user_ids": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, _) = call(
+        app.clone(),
+        Method::PUT,
+        &eligibility_uri,
+        Some(&admin_token),
+        Some(json!({ "user_ids": [admin_id] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, response) = call(
+        app.clone(),
+        Method::PUT,
+        &eligibility_uri,
+        Some(&admin_token),
+        Some(json!({ "user_ids": [member_id, member_id] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response["user_ids"].as_array().unwrap().len(), 1);
 
     let (status, _) = call(
         app.clone(),
@@ -466,8 +508,70 @@ async fn quiz_management_api_is_transactional_and_revision_safe() {
     assert_eq!(quiz_status, "open");
     assert_eq!(revision_count, 1);
     assert_eq!(version_count, 1);
-    assert_eq!(eligibility_count, 2);
+    assert_eq!(eligibility_count, 1);
     assert_eq!(duration_seconds, 900.0);
+
+    let (status, admin_start) = call(
+        app.clone(),
+        Method::POST,
+        &format!("/api/v1/quizzes/{quiz_id}/attempt-sessions"),
+        Some(&admin_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(admin_start["error"]["code"], "FORBIDDEN");
+
+    let (status, available) = call(
+        app.clone(),
+        Method::GET,
+        &format!("/api/v1/teams/{team_id}/quizzes/available"),
+        Some(&member_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(available["quizzes"].as_array().unwrap().len(), 1);
+
+    let (status, session) = call(
+        app.clone(),
+        Method::POST,
+        &format!("/api/v1/quizzes/{quiz_id}/attempt-sessions"),
+        Some(&member_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let session_id = session["session_id"].as_str().unwrap();
+    let question_version_id = session["questions"][0]["question_id"].as_str().unwrap();
+
+    let (status, submitted) = call(
+        app.clone(),
+        Method::POST,
+        &format!("/api/v1/attempt-sessions/{session_id}/submit"),
+        Some(&member_token),
+        Some(json!({
+            "answers": [{
+                "question_id": question_version_id,
+                "selected_option_index": 1
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(submitted["score"], 1);
+
+    let (status, results) = call(
+        app.clone(),
+        Method::GET,
+        &format!("/api/v1/quizzes/{quiz_id}/my-results"),
+        Some(&member_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(results["best_score"], 1);
+    assert_eq!(results["rank"], 1);
 
     let (status, first_close) = call(
         app.clone(),

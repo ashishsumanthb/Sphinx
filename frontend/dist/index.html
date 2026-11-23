@@ -163,8 +163,15 @@
               <div class="studio-grid">
                 <label class="field"><span>New team name <small>(used only when no admin team is selected)</small></span><input id="demo-team-name" value="Presentation Team" maxlength="100" /></label>
                 <label class="field"><span>Quiz title</span><input id="demo-quiz-title" value="Sphinx Launch Quiz" maxlength="150" /></label>
-                <label class="field builder-wide"><span>Eligible member user ID <small>(recommended for role demo)</small></span><input id="demo-member-id" placeholder="Register the member first, then paste their user UUID" /></label>
+                <label class="field builder-wide"><span>Description</span><input id="demo-quiz-description" value="A live demonstration of the consolidated Sphinx quiz platform" /></label>
+                <label class="field"><span>Attempts</span><select id="demo-max-attempts"><option value="1">One attempt</option><option value="2" selected>Two attempts</option></select></label>
+                <label class="field"><span>Duration</span><select id="demo-duration"><option value="10">10 minutes</option><option value="15" selected>15 minutes</option><option value="30">30 minutes</option></select></label>
               </div>
+              <div class="participant-header">
+                <div><strong>Assign participants</strong><small id="participant-copy">Loading team members…</small></div>
+                <button class="text-link" id="select-all-participants" type="button">Select all members</button>
+              </div>
+              <div class="participant-grid" id="participant-grid"></div>
               <div class="prepared-header">
                 <div><strong>Prepared questions</strong><small>Edit the extra question or publish the ready-made set.</small></div>
                 <span id="prepared-count">3 questions</span>
@@ -181,7 +188,7 @@
                 </div>
                 <button class="secondary-button compact-button" id="add-custom-question" type="button">Add to prepared set</button>
               </details>
-              <button class="primary-button workspace-action" id="publish-demo" type="button"><span>Create team, quiz & publish</span><b aria-hidden="true">→</b></button>
+              <button class="primary-button workspace-action" id="publish-demo" type="button"><span>Create quiz, assign members &amp; publish</span><b aria-hidden="true">→</b></button>
               <div class="workflow-status is-hidden" id="workflow-status"></div>
             </section>
 
