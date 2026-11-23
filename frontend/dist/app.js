@@ -234,10 +234,20 @@ function showAuthenticated() {
   authWrap.classList.add('results-mode');
   successState.classList.add('is-visible');
   document.querySelector('#signed-in-name').textContent = session.user.name.split(/\s+/)[0] || 'friend';
+  document.querySelector('#signed-in-user-id').textContent = session.user.id;
   renderPreparedQuestions();
   restoreDemoControls();
   switchWorkspace('studio');
 }
+
+document.querySelector('#copy-user-id').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(session.user.id);
+    showToast('User ID copied. Give it to the team admin before publication.');
+  } catch {
+    showToast(`Copy this user ID: ${session.user.id}`);
+  }
+});
 
 function showLogin() {
   successState.classList.remove('is-visible');
@@ -323,21 +333,30 @@ function setWorkflowStatus(message, kind = '') {
 function restoreDemoControls() {
   const start = document.querySelector('#start-demo-quiz');
   if (!demoWorkspace?.quizId) {
-    start.disabled = true;
+    updateStartAvailability();
     return;
   }
-  start.disabled = false;
+  document.querySelector('#play-quiz-id').value = demoWorkspace.quizId;
+  updateStartAvailability();
   document.querySelector('#play-availability').textContent = 'Published · ready';
   document.querySelector('#quiz-launch p').textContent = `${demoWorkspace.title} is published and ready to start.`;
   document.querySelector('#results-quiz-id').value = demoWorkspace.quizId;
-  setWorkflowStatus(`Published “${demoWorkspace.title}”. Quiz ID: ${demoWorkspace.quizId}`, 'is-success');
+  setWorkflowStatus(`Published “${demoWorkspace.title}”. Team ID: ${demoWorkspace.teamId}. Quiz ID: ${demoWorkspace.quizId}`, 'is-success');
 }
+
+function updateStartAvailability() {
+  const quizId = document.querySelector('#play-quiz-id').value.trim();
+  document.querySelector('#start-demo-quiz').disabled = !/^[0-9a-f-]{36}$/i.test(quizId);
+}
+
+document.querySelector('#play-quiz-id').addEventListener('input', updateStartAvailability);
 
 document.querySelector('#publish-demo').addEventListener('click', async (event) => {
   const button = event.currentTarget;
   const label = button.querySelector('span');
   const teamName = document.querySelector('#demo-team-name').value.trim();
   const title = document.querySelector('#demo-quiz-title').value.trim();
+  const memberId = document.querySelector('#demo-member-id').value.trim();
   if (!teamName || !title) {
     showToast('Enter a team name and quiz title.');
     return;
@@ -348,6 +367,12 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
     const team = await apiRequest('/api/v1/teams', {
       method: 'POST', token: session.token, body: { name: teamName }
     });
+    if (memberId) {
+      label.textContent = 'Adding eligible member…';
+      await apiRequest(`/api/v1/teams/${team.id}/members`, {
+        method: 'POST', token: session.token, body: { user_id: memberId }
+      });
+    }
     label.textContent = 'Creating quiz…';
     const quiz = await apiRequest(`/api/v1/teams/${team.id}/quizzes`, {
       method: 'POST', token: session.token,
@@ -365,8 +390,12 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
     });
     saveDemoWorkspace({ teamId: team.id, quizId: quiz.id, title });
     restoreDemoControls();
-    switchWorkspace('play');
-    showToast('Quiz published. You can start it now.');
+    if (memberId) {
+      showToast('Quiz published. Share the quiz ID with the eligible member.');
+    } else {
+      switchWorkspace('play');
+      showToast('Quiz published. The admin account can also start it as an eligible team member.');
+    }
   } catch (error) {
     setWorkflowStatus(error.message, 'is-error');
     showToast(error.message);
@@ -413,9 +442,10 @@ function renderQuizPlayer(attempt) {
 
 document.querySelector('#start-demo-quiz').addEventListener('click', async (event) => {
   const button = event.currentTarget;
+  const quizId = document.querySelector('#play-quiz-id').value.trim();
   button.disabled = true;
   try {
-    activeAttempt = await apiRequest(`/api/v1/quizzes/${demoWorkspace.quizId}/attempt-sessions`, {
+    activeAttempt = await apiRequest(`/api/v1/quizzes/${quizId}/attempt-sessions`, {
       method: 'POST', token: session.token
     });
     document.querySelector('#quiz-launch').classList.add('is-hidden');
