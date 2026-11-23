@@ -38,6 +38,6 @@ jobs:
       # These suites reset public and must run serially on this disposable service.
       - name: PostgreSQL host API and repository tests
         run: >-
-          cargo test --locked --test insights_postgres
+          cargo test --locked --test insights_host --test insights_postgres
           --test postgres_attempt_limits --test postgres_edge_cases
           -- --ignored --test-threads=1

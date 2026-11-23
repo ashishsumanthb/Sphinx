@@ -114,6 +114,7 @@ pub struct MyResultsResponse {
     pub revision_number: Option<u32>,
     pub rank: Option<u64>,
     pub attempts: Vec<MyAttemptResponse>,
+    #[serde(default)]
     pub revision_results: Vec<RevisionResultResponse>,
 }
 

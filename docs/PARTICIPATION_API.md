@@ -97,15 +97,15 @@ cargo test --all-targets
 cargo clippy --all-targets -- -D warnings
 ```
 
-CI also runs all three PostgreSQL suites against a disposable PostgreSQL 17
+CI also runs all four PostgreSQL suites against a disposable PostgreSQL 17
 service. They apply the real root migrations, including the unchanged
 `0020_quiz_management.sql` from `feat/quiz-management` (`c7a69ce`); no test defines
 alternative tables or columns. Run the same database checks locally with:
 
 ```bash
 TEST_DATABASE_URL=postgres://postgres:edgepass@127.0.0.1:55432/sphinx_edge \
-  cargo test --locked --test insights_postgres --test postgres_attempt_limits \
-  --test postgres_edge_cases -- --ignored --test-threads=1
+  cargo test --locked --test insights_host --test insights_postgres \
+  --test postgres_attempt_limits --test postgres_edge_cases -- --ignored --test-threads=1
 ```
 
 The insights suite invokes the complete host router and real login-session
@@ -114,6 +114,9 @@ outsiders including another team's admin, removed membership, missing/expired
 sessions, no attempts, multiple revisions with inverted timestamps, an
 unattempted newer revision, ties, repeat attempts, and summary/history consistency.
 These suites reset `public`; use an isolated test database and run them serially.
+The retained `insights_host` matrix also exercises real login/logout, caller
+identity isolation, fractional percentages, and zero scores. Its seed data lives
+in `tests/fixtures/insights.sql` and defines no alternative schema.
 
 Run the PostgreSQL timing, concurrency, rollback, retry, authorization,
 constraint, analytics, and dependency-failure matrix against an isolated test
