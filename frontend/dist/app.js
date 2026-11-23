@@ -13,6 +13,31 @@ const apiMeta = document.querySelector('meta[name="sphinx-api-base"]');
 const apiOverride = new URLSearchParams(window.location.search).get('apiBase');
 const API_BASE = (apiOverride || apiMeta?.content || window.location.origin).replace(/\/$/, '');
 const SESSION_KEY = 'sphinx.auth.session';
+const DEMO_KEY = 'sphinx.demo.workspace';
+
+const preparedQuestions = [
+  {
+    question_text: 'What does PostgreSQL provide during quiz publication?',
+    options: ['Atomic transactions', 'Browser animations', 'Email delivery'],
+    correct_option_index: 0,
+    explanation: 'The publication workflow uses a transaction so every database change succeeds or rolls back together.'
+  },
+  {
+    question_text: 'Why does Sphinx create a new revision after a published question changes?',
+    options: ['To preserve earlier attempts', 'To delete old results', 'To bypass authorization'],
+    correct_option_index: 0,
+    explanation: 'Immutable revisions keep earlier attempts tied to the exact questions and answer key participants saw.'
+  },
+  {
+    question_text: 'Which layer identifies the signed-in user?',
+    options: ['CSS', 'Session authentication', 'Quiz ranking'],
+    correct_option_index: 1,
+    explanation: 'The shared session extractor validates the Bearer token and supplies the authenticated user ID.'
+  }
+];
+
+let demoWorkspace = restoreDemoWorkspace();
+let activeAttempt = null;
 
 let mode = 'login';
 let session = restoreSession();
@@ -209,6 +234,9 @@ function showAuthenticated() {
   authWrap.classList.add('results-mode');
   successState.classList.add('is-visible');
   document.querySelector('#signed-in-name').textContent = session.user.name.split(/\s+/)[0] || 'friend';
+  renderPreparedQuestions();
+  restoreDemoControls();
+  switchWorkspace('studio');
 }
 
 function showLogin() {
@@ -219,7 +247,217 @@ function showLogin() {
   heading.classList.remove('is-hidden');
   form.reset();
   setMode('login');
+  activeAttempt = null;
 }
+
+function restoreDemoWorkspace() {
+  try {
+    return JSON.parse(window.localStorage.getItem(DEMO_KEY)) || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDemoWorkspace(value) {
+  demoWorkspace = value;
+  window.localStorage.setItem(DEMO_KEY, JSON.stringify(value));
+}
+
+function switchWorkspace(name) {
+  document.querySelectorAll('.workspace-tab').forEach((tab) => {
+    tab.classList.toggle('is-active', tab.dataset.workspace === name);
+  });
+  document.querySelectorAll('.workspace-panel').forEach((panel) => panel.classList.add('is-hidden'));
+  document.querySelector(`#${name}-workspace`).classList.remove('is-hidden');
+}
+
+document.querySelectorAll('.workspace-tab').forEach((tab) => {
+  tab.addEventListener('click', () => switchWorkspace(tab.dataset.workspace));
+});
+
+function renderPreparedQuestions() {
+  const container = document.querySelector('#prepared-list');
+  container.replaceChildren(...preparedQuestions.map((question, index) => {
+    const card = document.createElement('article');
+    card.className = 'prepared-question';
+    const number = document.createElement('span');
+    number.textContent = String(index + 1).padStart(2, '0');
+    const copy = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = question.question_text;
+    const detail = document.createElement('small');
+    detail.textContent = `${question.options.length} options · answer: ${question.options[question.correct_option_index]}`;
+    copy.append(title, detail);
+    card.append(number, copy);
+    return card;
+  }));
+  document.querySelector('#prepared-count').textContent = `${preparedQuestions.length} questions`;
+}
+
+document.querySelector('#add-custom-question').addEventListener('click', () => {
+  const question = document.querySelector('#custom-question').value.trim();
+  const optionA = document.querySelector('#custom-option-a').value.trim();
+  const optionB = document.querySelector('#custom-option-b').value.trim();
+  if (!question || !optionA || !optionB) {
+    showToast('Enter a question and both answer options.');
+    return;
+  }
+  preparedQuestions.push({
+    question_text: question,
+    options: [optionA, optionB],
+    correct_option_index: Number(document.querySelector('#custom-correct').value),
+    explanation: document.querySelector('#custom-explanation').value.trim() || 'Prepared by the quiz administrator.'
+  });
+  ['custom-question', 'custom-option-a', 'custom-option-b', 'custom-explanation']
+    .forEach((id) => { document.querySelector(`#${id}`).value = ''; });
+  renderPreparedQuestions();
+  showToast('Question added to the prepared set.');
+});
+
+function setWorkflowStatus(message, kind = '') {
+  const status = document.querySelector('#workflow-status');
+  status.textContent = message;
+  status.className = `workflow-status ${kind}`.trim();
+}
+
+function restoreDemoControls() {
+  const start = document.querySelector('#start-demo-quiz');
+  if (!demoWorkspace?.quizId) {
+    start.disabled = true;
+    return;
+  }
+  start.disabled = false;
+  document.querySelector('#play-availability').textContent = 'Published · ready';
+  document.querySelector('#quiz-launch p').textContent = `${demoWorkspace.title} is published and ready to start.`;
+  document.querySelector('#results-quiz-id').value = demoWorkspace.quizId;
+  setWorkflowStatus(`Published “${demoWorkspace.title}”. Quiz ID: ${demoWorkspace.quizId}`, 'is-success');
+}
+
+document.querySelector('#publish-demo').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const label = button.querySelector('span');
+  const teamName = document.querySelector('#demo-team-name').value.trim();
+  const title = document.querySelector('#demo-quiz-title').value.trim();
+  if (!teamName || !title) {
+    showToast('Enter a team name and quiz title.');
+    return;
+  }
+  button.disabled = true;
+  label.textContent = 'Creating team…';
+  try {
+    const team = await apiRequest('/api/v1/teams', {
+      method: 'POST', token: session.token, body: { name: teamName }
+    });
+    label.textContent = 'Creating quiz…';
+    const quiz = await apiRequest(`/api/v1/teams/${team.id}/quizzes`, {
+      method: 'POST', token: session.token,
+      body: { title, description: 'Prepared for the Sphinx presentation demo', max_attempts: 2 }
+    });
+    for (let index = 0; index < preparedQuestions.length; index += 1) {
+      label.textContent = `Posting question ${index + 1}/${preparedQuestions.length}…`;
+      await apiRequest(`/api/v1/teams/${team.id}/quizzes/${quiz.id}/questions`, {
+        method: 'POST', token: session.token, body: preparedQuestions[index]
+      });
+    }
+    label.textContent = 'Publishing…';
+    await apiRequest(`/api/v1/quizzes/${quiz.id}/publish`, {
+      method: 'POST', token: session.token, body: { duration_minutes: 15 }
+    });
+    saveDemoWorkspace({ teamId: team.id, quizId: quiz.id, title });
+    restoreDemoControls();
+    switchWorkspace('play');
+    showToast('Quiz published. You can start it now.');
+  } catch (error) {
+    setWorkflowStatus(error.message, 'is-error');
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+    label.textContent = 'Create team, quiz & publish';
+  }
+});
+
+function renderQuizPlayer(attempt) {
+  const player = document.querySelector('#quiz-player');
+  player.replaceChildren();
+  const meta = document.createElement('p');
+  meta.className = 'quiz-meta';
+  meta.textContent = `Attempt ${attempt.attempt_number} of ${attempt.max_attempts} · closes ${new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(attempt.deadline))}`;
+  player.append(meta);
+  attempt.questions.forEach((question, questionIndex) => {
+    const fieldset = document.createElement('fieldset');
+    fieldset.className = 'play-question';
+    const legend = document.createElement('legend');
+    legend.textContent = `${questionIndex + 1}. ${question.question_text}`;
+    fieldset.append(legend);
+    question.options.forEach((option, optionIndex) => {
+      const label = document.createElement('label');
+      label.className = 'answer-option';
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = `answer-${question.question_id}`;
+      input.value = String(optionIndex);
+      const text = document.createElement('span');
+      text.textContent = option;
+      label.append(input, text);
+      fieldset.append(label);
+    });
+    player.append(fieldset);
+  });
+  const submit = document.createElement('button');
+  submit.className = 'primary-button workspace-action';
+  submit.type = 'submit';
+  submit.innerHTML = '<span>Submit answers</span><b aria-hidden="true">→</b>';
+  player.append(submit);
+  player.classList.remove('is-hidden');
+}
+
+document.querySelector('#start-demo-quiz').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    activeAttempt = await apiRequest(`/api/v1/quizzes/${demoWorkspace.quizId}/attempt-sessions`, {
+      method: 'POST', token: session.token
+    });
+    document.querySelector('#quiz-launch').classList.add('is-hidden');
+    document.querySelector('#submission-result').classList.add('is-hidden');
+    renderQuizPlayer(activeAttempt);
+  } catch (error) {
+    showToast(error.message);
+    button.disabled = false;
+  }
+});
+
+document.querySelector('#quiz-player').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const answers = activeAttempt.questions.map((question) => {
+    const selected = event.currentTarget.querySelector(`input[name="answer-${question.question_id}"]:checked`);
+    return selected ? { question_id: question.question_id, selected_option_index: Number(selected.value) } : null;
+  });
+  if (answers.some((answer) => answer === null)) {
+    showToast('Answer every question before submitting.');
+    return;
+  }
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const result = await apiRequest(`/api/v1/attempt-sessions/${activeAttempt.session_id}/submit`, {
+      method: 'POST', token: session.token, body: { answers }
+    });
+    event.currentTarget.classList.add('is-hidden');
+    const summary = document.querySelector('#submission-result');
+    summary.textContent = `Submitted successfully: ${result.score}/${result.total_questions} (${formatPercentage(result.percentage)}). ${result.remaining_attempts} attempt(s) remaining.`;
+    summary.classList.remove('is-hidden');
+    document.querySelector('#results-quiz-id').value = result.quiz_id;
+    showToast('Attempt saved in PostgreSQL.');
+    setTimeout(() => {
+      switchWorkspace('results');
+      resultsForm.requestSubmit();
+    }, 700);
+  } catch (error) {
+    showToast(error.message);
+    button.disabled = false;
+  }
+});
 
 function formatPercentage(value) {
   return value == null ? '—' : `${Number(value).toFixed(1).replace(/\.0$/, '')}%`;
