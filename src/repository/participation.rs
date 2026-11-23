@@ -35,7 +35,7 @@ impl ParticipationRepository {
         let rows = sqlx::query_as::<_, (Uuid, Uuid, String, DateTime<Utc>, DateTime<Utc>)>(
             r#"SELECT q.id, q.team_id, q.title, q.starts_at, q.ends_at
                FROM quizzes q
-               JOIN team_members tm ON tm.team_id = q.team_id AND tm.user_id = $2
+               JOIN team_memberships tm ON tm.team_id = q.team_id AND tm.user_id = $2
                JOIN quiz_eligibilities qe ON qe.quiz_id = q.id AND qe.user_id = $2
                WHERE q.team_id = $1
                  AND q.status = 'open'
@@ -394,7 +394,7 @@ impl ParticipationRepository {
                FROM quiz_attempts a JOIN quizzes q ON q.id = a.quiz_id
                WHERE a.id = $1 AND (
                    a.user_id = $2 OR EXISTS (
-                       SELECT 1 FROM team_members tm
+                       SELECT 1 FROM team_memberships tm
                        WHERE tm.team_id = q.team_id AND tm.user_id = $2 AND tm.role = 'admin'
                    )
                )"#,
@@ -480,7 +480,7 @@ impl ParticipationRepository {
         user_id: Uuid,
     ) -> Result<QuizAnalyticsResponse, AppError> {
         let authorized = sqlx::query_scalar::<_, bool>(
-            r#"SELECT EXISTS(SELECT 1 FROM quizzes q JOIN team_members tm ON tm.team_id = q.team_id
+            r#"SELECT EXISTS(SELECT 1 FROM quizzes q JOIN team_memberships tm ON tm.team_id = q.team_id
                WHERE q.id = $1 AND tm.user_id = $2 AND tm.role = 'admin')"#,
         )
         .bind(quiz_id)
@@ -500,12 +500,22 @@ impl ParticipationRepository {
         .fetch_one(&self.pool)
         .await?;
         let rows = sqlx::query_as::<_, (Uuid, i32, i32, i32, f64, i64)>(
-            r#"SELECT a.user_id, r.revision_no, a.score, a.total_questions,
-                      a.score::double precision * 100.0 / a.total_questions,
-                      RANK() OVER (PARTITION BY a.quiz_revision_id
-                                   ORDER BY a.score::double precision / a.total_questions DESC)
-               FROM quiz_attempts a JOIN quiz_revisions r ON r.id = a.quiz_revision_id
-               WHERE a.quiz_id = $1"#,
+            r#"WITH best_scores AS (
+                   SELECT DISTINCT ON (a.user_id, a.quiz_revision_id)
+                          a.user_id, a.quiz_revision_id, r.revision_no,
+                          a.score, a.total_questions,
+                          a.score::double precision / a.total_questions AS ratio
+                   FROM quiz_attempts a
+                   JOIN quiz_revisions r ON r.id = a.quiz_revision_id
+                   WHERE a.quiz_id = $1
+                   ORDER BY a.user_id, a.quiz_revision_id, ratio DESC,
+                            a.submitted_at, a.id
+               )
+               SELECT user_id, revision_no, score, total_questions,
+                      ratio * 100.0,
+                      RANK() OVER (PARTITION BY quiz_revision_id ORDER BY ratio DESC)
+               FROM best_scores
+               ORDER BY revision_no, rank, user_id"#,
         )
         .bind(quiz_id)
         .fetch_all(&self.pool)

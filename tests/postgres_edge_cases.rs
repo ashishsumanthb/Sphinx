@@ -13,13 +13,17 @@ const DEFAULT_DATABASE_URL: &str = "postgres://postgres:edgepass@127.0.0.1:55432
 async fn reset(pool: &PgPool) {
     sqlx::raw_sql(
         r#"DROP SCHEMA public CASCADE; CREATE SCHEMA public;
-        CREATE EXTENSION IF NOT EXISTS pgcrypto;
-        CREATE TABLE users (id UUID PRIMARY KEY);
-        CREATE TABLE teams (id UUID PRIMARY KEY);
-        CREATE TABLE team_members (
-            team_id UUID REFERENCES teams(id), user_id UUID REFERENCES users(id),
-            role TEXT NOT NULL, PRIMARY KEY(team_id,user_id));
-        CREATE TABLE quizzes (
+        CREATE EXTENSION IF NOT EXISTS pgcrypto;"#,
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(include_str!("../migrations/001_identity_and_teams.sql"))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        r#"CREATE TABLE quizzes (
             id UUID PRIMARY KEY, team_id UUID REFERENCES teams(id), title TEXT NOT NULL,
             status TEXT NOT NULL, starts_at TIMESTAMPTZ NOT NULL, ends_at TIMESTAMPTZ NOT NULL,
             manually_closed_at TIMESTAMPTZ, max_attempts SMALLINT NOT NULL DEFAULT 1);
@@ -60,10 +64,18 @@ async fn seed(pool: &PgPool, starts: chrono::DateTime<Utc>, ends: chrono::DateTi
         other: Uuid::new_v4(), quiz: Uuid::new_v4(), revision: Uuid::new_v4(),
         question: Uuid::new_v4(),
     };
-    sqlx::query("INSERT INTO users(id) VALUES ($1),($2),($3)")
-        .bind(seed.admin).bind(seed.member).bind(seed.other).execute(pool).await.unwrap();
-    sqlx::query("INSERT INTO teams(id) VALUES ($1)").bind(seed.team).execute(pool).await.unwrap();
-    sqlx::query("INSERT INTO team_members VALUES ($1,$2,'admin'),($1,$3,'member'),($1,$4,'member')")
+    sqlx::query(
+        "INSERT INTO users(id,name,email,password_hash) VALUES
+         ($1,'Admin',$4,'hash'),($2,'Member',$5,'hash'),($3,'Other',$6,'hash')",
+    )
+        .bind(seed.admin).bind(seed.member).bind(seed.other)
+        .bind(format!("{}@example.com", seed.admin))
+        .bind(format!("{}@example.com", seed.member))
+        .bind(format!("{}@example.com", seed.other))
+        .execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO teams(id,name,created_by) VALUES ($1,'Edge team',$2)")
+        .bind(seed.team).bind(seed.admin).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO team_memberships(team_id,user_id,role) VALUES ($1,$2,'admin'),($1,$3,'member'),($1,$4,'member')")
         .bind(seed.team).bind(seed.admin).bind(seed.member).bind(seed.other).execute(pool).await.unwrap();
     sqlx::query("INSERT INTO quizzes(id,team_id,title,status,starts_at,ends_at,max_attempts) VALUES($1,$2,'Edge quiz','open',$3,$4,1)")
         .bind(seed.quiz).bind(seed.team).bind(starts).bind(ends).execute(pool).await.unwrap();
@@ -133,16 +145,25 @@ async fn postgres_edge_case_matrix() {
     assert!(repo.attempt_review(first.attempt_id, base.member).await.is_ok());
     assert!(repo.attempt_review(first.attempt_id, base.admin).await.is_ok());
     let stranger = Uuid::new_v4();
-    sqlx::query("INSERT INTO users VALUES($1)").bind(stranger).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO users(id,name,email,password_hash) VALUES($1,'Stranger',$2,'hash')")
+        .bind(stranger)
+        .bind(format!("{stranger}@example.com"))
+        .execute(&pool).await.unwrap();
     assert_eq!(repo.attempt_review(first.attempt_id, stranger).await.unwrap_err().status(), axum::http::StatusCode::FORBIDDEN);
 
     // Foreign keys and uniqueness are enforced by PostgreSQL.
     let invalid = sqlx::query("INSERT INTO attempt_sessions(quiz_id,user_id,quiz_revision_id) VALUES($1,$2,$3)")
         .bind(base.quiz).bind(stranger).bind(base.revision).execute(&pool).await;
     assert!(invalid.is_err());
-    let duplicate = sqlx::query("INSERT INTO quiz_attempts(session_id,quiz_id,user_id,quiz_revision_id,request_hash,score,total_questions) SELECT session_id,quiz_id,user_id,quiz_revision_id,request_hash,score,total_questions FROM quiz_attempts LIMIT 1")
+    let duplicate = sqlx::query("INSERT INTO quiz_attempts(session_id,quiz_id,user_id,quiz_revision_id,attempt_no,request_hash,score,total_questions) SELECT session_id,quiz_id,user_id,quiz_revision_id,attempt_no,request_hash,score,total_questions FROM quiz_attempts LIMIT 1")
         .execute(&pool).await;
-    assert!(duplicate.is_err());
+    let duplicate_error = duplicate.unwrap_err();
+    assert_eq!(
+        duplicate_error
+            .as_database_error()
+            .and_then(|error| error.constraint()),
+        Some("quiz_attempts_session_id_key")
+    );
 
     // Exact end is exclusive.
     sqlx::query("UPDATE quizzes SET ends_at=clock_timestamp() WHERE id=$1").bind(base.quiz).execute(&pool).await.unwrap();
@@ -179,11 +200,12 @@ async fn postgres_edge_case_matrix() {
     assert_eq!(sqlx::query_scalar::<_, String>("SELECT status FROM attempt_sessions WHERE id=$1").bind(rollback_session.session_id).fetch_one(&pool).await.unwrap(), "in_progress");
     sqlx::raw_sql("DROP TRIGGER force_answer_failure ON attempt_answers; DROP FUNCTION fail_answer();").execute(&pool).await.unwrap();
 
-    // Analytics ties are competition-ranked within each revision, never across revisions.
+    // Analytics ranks each participant's best attempt per revision. Submission
+    // counts and averages still include every stored attempt.
     let ranked_quiz = Uuid::new_v4();
     let revision_one = Uuid::new_v4();
     let revision_two = Uuid::new_v4();
-    sqlx::query("INSERT INTO quizzes(id,team_id,title,status,starts_at,ends_at,max_attempts) VALUES($1,$2,'Ranks','closed',clock_timestamp()-interval '1 hour',clock_timestamp(),1)")
+    sqlx::query("INSERT INTO quizzes(id,team_id,title,status,starts_at,ends_at,max_attempts) VALUES($1,$2,'Ranks','closed',clock_timestamp()-interval '1 hour',clock_timestamp(),2)")
         .bind(ranked_quiz).bind(base.team).execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO quiz_revisions VALUES($1,$3,1),($2,$3,2)")
         .bind(revision_one).bind(revision_two).bind(ranked_quiz).execute(&pool).await.unwrap();
@@ -192,19 +214,30 @@ async fn postgres_edge_case_matrix() {
     let session_a = Uuid::new_v4();
     let session_b = Uuid::new_v4();
     let session_c = Uuid::new_v4();
-    sqlx::query("INSERT INTO attempt_sessions(id,quiz_id,user_id,quiz_revision_id,status) VALUES($1,$4,$5,$7,'submitted'),($2,$4,$6,$7,'submitted'),($3,$4,$8,$9,'submitted')")
-        .bind(session_a).bind(session_b).bind(session_c).bind(ranked_quiz)
+    let session_d = Uuid::new_v4();
+    sqlx::query("INSERT INTO attempt_sessions(id,quiz_id,user_id,quiz_revision_id,status) VALUES($1,$5,$6,$8,'submitted'),($2,$5,$6,$8,'submitted'),($3,$5,$7,$8,'submitted'),($4,$5,$9,$10,'submitted')")
+        .bind(session_a).bind(session_b).bind(session_c).bind(session_d).bind(ranked_quiz)
         .bind(base.member).bind(base.other).bind(revision_one).bind(stranger).bind(revision_two)
         .execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO quiz_attempts(session_id,quiz_id,user_id,quiz_revision_id,request_hash,score,total_questions) VALUES($1,$4,$5,$7,$10,2,2),($2,$4,$6,$7,$10,2,2),($3,$4,$8,$9,$10,1,2)")
-        .bind(session_a).bind(session_b).bind(session_c).bind(ranked_quiz)
+    sqlx::query("INSERT INTO quiz_attempts(session_id,quiz_id,user_id,quiz_revision_id,attempt_no,request_hash,score,total_questions) VALUES($1,$5,$6,$8,1,$11,10,10),($2,$5,$6,$8,2,$11,9,10),($3,$5,$7,$8,1,$11,8,10),($4,$5,$9,$10,1,$11,5,10)")
+        .bind(session_a).bind(session_b).bind(session_c).bind(session_d).bind(ranked_quiz)
         .bind(base.member).bind(base.other).bind(revision_one).bind(stranger).bind(revision_two)
         .bind("a".repeat(64)).execute(&pool).await.unwrap();
     let analytics = repo.quiz_analytics(ranked_quiz, base.admin).await.unwrap();
     assert_eq!(analytics.participation_rate, Some(100.0));
+    assert_eq!(analytics.total_submissions, 4);
+    assert_eq!(analytics.unique_participants, 3);
+    assert_eq!(analytics.average_score_percentage, Some(80.0));
     assert_eq!(analytics.participants.len(), 3);
-    assert!(analytics.participants.iter().filter(|row| row.revision_number == 1).all(|row| row.rank == 1));
-    assert!(analytics.participants.iter().filter(|row| row.revision_number == 2).all(|row| row.rank == 1));
+    let member_rank = analytics.participants.iter()
+        .find(|row| row.user_id == base.member && row.revision_number == 1).unwrap();
+    assert_eq!((member_rank.score, member_rank.rank), (10, 1));
+    let other_rank = analytics.participants.iter()
+        .find(|row| row.user_id == base.other && row.revision_number == 1).unwrap();
+    assert_eq!((other_rank.score, other_rank.rank), (8, 2));
+    let revision_two_rank = analytics.participants.iter()
+        .find(|row| row.user_id == stranger && row.revision_number == 2).unwrap();
+    assert_eq!(revision_two_rank.rank, 1);
 
     // Unavailable database maps to a safe 503 error.
     let dead = PgPoolOptions::new().acquire_timeout(StdDuration::from_millis(100))
