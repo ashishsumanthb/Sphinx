@@ -3,6 +3,7 @@ pub mod auth;
 pub mod domain;
 pub mod password;
 pub(crate) mod permissions;
+mod quiz_admin;
 pub mod repository;
 pub mod services;
 pub mod session;
@@ -46,5 +47,6 @@ pub fn app(state: AppState) -> Router {
         .nest("/api/v1/auth", auth::routes())
         .nest("/api/v1/teams", teams::routes())
         .merge(api::routes::participation_routes())
+        .merge(quiz_admin::routes())
         .with_state(state)
 }
