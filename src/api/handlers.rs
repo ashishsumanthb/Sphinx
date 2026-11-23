@@ -10,9 +10,9 @@ use crate::{
     api::{
         auth::AuthenticatedUser,
         dto::{
-            AttemptSessionResponse, AvailableQuizListResponse, MyAttemptsResponse,
-            AttemptReviewResponse, MyResultsResponse, PublicQuestionResponse,
-            QuizAnalyticsResponse, SubmitAttemptRequest, SubmitAttemptResponse,
+            AttemptReviewResponse, AttemptSessionResponse, AvailableQuizListResponse,
+            MyAttemptsResponse, MyResultsResponse, PublicQuestionResponse, QuizAnalyticsResponse,
+            SubmitAttemptRequest, SubmitAttemptResponse,
         },
         error::ApiResult,
     },
@@ -79,7 +79,9 @@ pub async fn attempt_review(
     auth: AuthenticatedUser,
     Path(attempt_id): Path<Uuid>,
 ) -> ApiResult<Json<AttemptReviewResponse>> {
-    Ok(Json(service(&state).attempt_review(attempt_id, auth.id).await?))
+    Ok(Json(
+        service(&state).attempt_review(attempt_id, auth.id).await?,
+    ))
 }
 
 pub async fn my_results(
@@ -95,5 +97,7 @@ pub async fn quiz_analytics(
     auth: AuthenticatedUser,
     Path(quiz_id): Path<Uuid>,
 ) -> ApiResult<Json<QuizAnalyticsResponse>> {
-    Ok(Json(service(&state).quiz_analytics(quiz_id, auth.id).await?))
+    Ok(Json(
+        service(&state).quiz_analytics(quiz_id, auth.id).await?,
+    ))
 }

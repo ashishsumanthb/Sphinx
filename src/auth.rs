@@ -1,9 +1,5 @@
 pub use crate::session::AuthUser;
-use crate::{
-    AppState,
-    api::dto::{ErrorDetail, ErrorResponse},
-    password, session,
-};
+use crate::{AppState, password, session};
 use axum::{
     Json, Router,
     extract::{State, rejection::JsonRejection},
@@ -28,6 +24,11 @@ struct UserResponse {
     email: String,
 }
 
+#[derive(Serialize)]
+pub(crate) struct ErrorResponse {
+    pub(crate) error: &'static str,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LoginRequest {
@@ -46,27 +47,7 @@ struct LoginResponse {
 pub(crate) type ApiError = (StatusCode, Json<ErrorResponse>);
 
 pub(crate) fn api_error(status: StatusCode, message: &'static str) -> ApiError {
-    let code = match status {
-        StatusCode::BAD_REQUEST => "BAD_REQUEST",
-        StatusCode::UNAUTHORIZED => "UNAUTHENTICATED",
-        StatusCode::FORBIDDEN => "FORBIDDEN",
-        StatusCode::NOT_FOUND => "NOT_FOUND",
-        StatusCode::CONFLICT => "CONFLICT",
-        StatusCode::UNPROCESSABLE_ENTITY => "VALIDATION_ERROR",
-        _ if status.is_server_error() => "INTERNAL_ERROR",
-        _ => "REQUEST_ERROR",
-    };
-
-    (
-        status,
-        Json(ErrorResponse {
-            error: ErrorDetail {
-                code: code.to_owned(),
-                message: message.to_owned(),
-                request_id: format!("req_{}", Uuid::new_v4().simple()),
-            },
-        }),
-    )
+    (status, Json(ErrorResponse { error: message }))
 }
 
 pub fn routes() -> Router<AppState> {

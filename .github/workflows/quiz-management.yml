@@ -1,0 +1,49 @@
+name: Quiz management verification
+
+on:
+  pull_request:
+  push:
+    branches: [developer, feat/quiz-management]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: sphinx_test
+          POSTGRES_DB: sphinx_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sphinx_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:sphinx_test@localhost:5432/sphinx_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --all-targets
+      - name: PostgreSQL workflow and concurrency regressions
+        run: >-
+          cargo test --locked --test quiz_management_postgres
+          --test postgres_attempt_limits --test postgres_edge_cases
+          -- --ignored --test-threads=1
+      - name: Check PR whitespace
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git diff --check "$BASE_SHA"...HEAD

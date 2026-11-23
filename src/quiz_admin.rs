@@ -1,7 +1,8 @@
 use crate::domain::question_validation::{QuestionDraft, validate_question};
 use crate::{
     AppState,
-    auth::{ApiError, AuthUser, api_error},
+    api::error::AppError as ApiError,
+    auth::{self, AuthUser},
     domain::quiz::{Quiz, QuizRevision, QuizStatus},
     permissions::require_admin,
     services::quiz_service::{
@@ -106,6 +107,27 @@ struct UpdatedQuestion {
     #[serde(skip_serializing_if = "Option::is_none")]
     revision_no: Option<i32>,
 }
+
+// Quiz-management rejections use the existing structured AppError without
+// changing the established auth/session/team error response contract.
+fn api_error(status: StatusCode, message: &'static str) -> ApiError {
+    let code = match status {
+        StatusCode::BAD_REQUEST => "BAD_REQUEST",
+        StatusCode::UNAUTHORIZED => "UNAUTHENTICATED",
+        StatusCode::FORBIDDEN => "FORBIDDEN",
+        StatusCode::NOT_FOUND => "NOT_FOUND",
+        StatusCode::CONFLICT => "CONFLICT",
+        StatusCode::UNPROCESSABLE_ENTITY => "VALIDATION_ERROR",
+        _ if status.is_server_error() => "INTERNAL_ERROR",
+        _ => "REQUEST_ERROR",
+    };
+    ApiError::new(status, code, message)
+}
+
+fn permission_error((status, Json(error)): auth::ApiError) -> ApiError {
+    api_error(status, error.error)
+}
+
 fn invalid_path(error: PathRejection) -> ApiError {
     api_error(error.status(), "Path parameters are invalid")
 }
@@ -123,6 +145,22 @@ async fn publish_quiz(
     let Json(request) = payload.map_err(invalid_json)?;
 
     let mut tx = state.pool.begin().await.map_err(publish_db_error)?;
+    // Discover ownership without a row lock, then follow the same lock order
+    // as add/edit/create and membership changes: team -> membership -> quiz.
+    let team_id = sqlx::query_scalar::<_, Uuid>("SELECT team_id FROM quizzes WHERE id = $1")
+        .bind(quiz_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(publish_db_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Quiz not found"))?;
+    require_admin(
+        &mut tx,
+        team_id,
+        user.id,
+        "Only a team admin can publish a quiz",
+    )
+    .await
+    .map_err(permission_error)?;
     let (
         team_id,
         title,
@@ -163,22 +201,15 @@ async fn publish_quiz(
                 created_at,
                 clock_timestamp()
          FROM quizzes
-         WHERE id = $1
+         WHERE id = $1 AND team_id = $2
          FOR UPDATE",
     )
     .bind(quiz_id)
+    .bind(team_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(publish_db_error)?
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Quiz not found"))?;
-
-    require_admin(
-        &mut tx,
-        team_id,
-        user.id,
-        "Only a team admin can publish a quiz",
-    )
-    .await?;
 
     if status != "draft" {
         return Err(api_error(
@@ -428,6 +459,22 @@ async fn close_published_quiz(
 
     let mut tx = state.pool.begin().await.map_err(close_db_error)?;
 
+    // Team ownership is rechecked when the quiz row is locked below.
+    let team_id = sqlx::query_scalar::<_, Uuid>("SELECT team_id FROM quizzes WHERE id = $1")
+        .bind(quiz_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(close_db_error)?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Quiz not found"))?;
+    require_admin(
+        &mut tx,
+        team_id,
+        user.id,
+        "Only a team admin can close a quiz",
+    )
+    .await
+    .map_err(permission_error)?;
+
     let (
         team_id,
         title,
@@ -468,22 +515,15 @@ async fn close_published_quiz(
                 created_at,
                 clock_timestamp()
          FROM quizzes
-         WHERE id = $1
+         WHERE id = $1 AND team_id = $2
          FOR UPDATE",
     )
     .bind(quiz_id)
+    .bind(team_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(close_db_error)?
     .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Quiz not found"))?;
-
-    require_admin(
-        &mut tx,
-        team_id,
-        user.id,
-        "Only a team admin can close a quiz",
-    )
-    .await?;
 
     let domain_status = match status.as_str() {
         "draft" => QuizStatus::Draft,
@@ -564,7 +604,8 @@ async fn add_question(
         user.id,
         "Only a team admin can add a question",
     )
-    .await?;
+    .await
+    .map_err(permission_error)?;
 
     let status = sqlx::query_scalar::<_, String>(
         "SELECT status FROM quizzes
@@ -648,7 +689,8 @@ async fn edit_question(
         user.id,
         "Only a team admin can edit a question",
     )
-    .await?;
+    .await
+    .map_err(permission_error)?;
 
     let (status, database_time) = sqlx::query_as::<_, (String, DateTime<Utc>)>(
         "SELECT status, clock_timestamp()
@@ -987,7 +1029,8 @@ async fn create_quiz(
         user.id,
         "Only a team admin can create a quiz",
     )
-    .await?;
+    .await
+    .map_err(permission_error)?;
 
     let (id, status) = sqlx::query_as::<_, (Uuid, String)>(
         "INSERT INTO quizzes (team_id, created_by, title, description, max_attempts)

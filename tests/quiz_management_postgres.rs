@@ -10,6 +10,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use sphinx::{AppState, app};
 use sqlx::{PgPool, postgres::PgPoolOptions};
+use std::time::Duration;
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -577,4 +578,261 @@ async fn quiz_management_api_is_transactional_and_revision_safe() {
     .await;
 
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+async fn wait_for_blocked_query(pool: &PgPool, blocker_pid: i32, query_fragment: &str) -> i32 {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let blocked_pid = sqlx::query_scalar::<_, i32>(
+                "SELECT pid FROM pg_stat_activity
+                 WHERE datname = current_database()
+                   AND wait_event_type = 'Lock'
+                   AND $1 = ANY(pg_blocking_pids(pid))
+                   AND position($2 in query) > 0",
+            )
+            .bind(blocker_pid)
+            .bind(query_fragment)
+            .fetch_optional(pool)
+            .await
+            .unwrap();
+
+            if let Some(pid) = blocked_pid {
+                return pid;
+            }
+
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!("No query containing {query_fragment:?} blocked by backend {blocker_pid}")
+    })
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL database; run with --test-threads=1"]
+async fn quiz_management_cross_operation_lock_order_is_consistent() {
+    let database_url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&database_url)
+        .await
+        .unwrap();
+    reset_schema(&pool).await;
+
+    let app = app(AppState { pool: pool.clone() });
+    let admin_id = register_user(
+        app.clone(),
+        "Concurrency Admin",
+        "concurrency-admin@example.com",
+        "ConcurrentQuizTest123!",
+    )
+    .await;
+    let admin_token = login(
+        app.clone(),
+        "concurrency-admin@example.com",
+        "ConcurrentQuizTest123!",
+    )
+    .await;
+    let team_id = create_team(app.clone(), &admin_token).await;
+
+    for (transition, edit) in [
+        ("publish", false),
+        ("publish", true),
+        ("close", false),
+        ("close", true),
+    ] {
+        let case = format!("{transition} versus {}", if edit { "edit" } else { "add" });
+        let (status, created) = call(
+            app.clone(),
+            Method::POST,
+            &format!("/api/v1/teams/{team_id}/quizzes"),
+            Some(&admin_token),
+            Some(json!({"title": case, "max_attempts": 1})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{case}: {created}");
+        let quiz_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+        let question_uri = format!("/api/v1/teams/{team_id}/quizzes/{quiz_id}/questions");
+        let (status, question) = call(
+            app.clone(),
+            Method::POST,
+            &question_uri,
+            Some(&admin_token),
+            Some(json!({
+                "question_text": "Original question",
+                "options": ["First", "Second"],
+                "correct_option_index": 0
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{case}: {question}");
+        let question_id = question["stable_question_id"].as_str().unwrap();
+
+        if transition == "close" {
+            let (status, response) = call(
+                app.clone(),
+                Method::POST,
+                &format!("/api/v1/quizzes/{quiz_id}/publish"),
+                Some(&admin_token),
+                Some(json!({})),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{case}: {response}");
+        }
+
+        // Stop add/edit after it owns the team row, at its membership check.
+        // PostgreSQL's wait graph provides the barrier; scheduling delays do not.
+        let mut membership_gate = pool.begin().await.unwrap();
+        let gate_pid = sqlx::query_scalar::<_, i32>("SELECT pg_backend_pid()")
+            .fetch_one(&mut *membership_gate)
+            .await
+            .unwrap();
+        sqlx::query(
+            "SELECT role FROM team_memberships
+             WHERE team_id = $1 AND user_id = $2 FOR UPDATE",
+        )
+        .bind(team_id)
+        .bind(admin_id)
+        .fetch_one(&mut *membership_gate)
+        .await
+        .unwrap();
+
+        let mutation_app = app.clone();
+        let mutation_token = admin_token.clone();
+        let mutation_uri = if edit {
+            format!("{question_uri}/{question_id}")
+        } else {
+            question_uri
+        };
+        let changed_text = if edit {
+            "Edited question"
+        } else {
+            "Added question"
+        };
+        let mutation = tokio::spawn(async move {
+            call(
+                mutation_app,
+                if edit { Method::PUT } else { Method::POST },
+                &mutation_uri,
+                Some(&mutation_token),
+                Some(json!({
+                    "question_text": changed_text,
+                    "options": ["First", "Second"],
+                    "correct_option_index": 1,
+                    "change_reason": "Concurrency regression coverage"
+                })),
+            )
+            .await
+        });
+        let mutation_pid = wait_for_blocked_query(&pool, gate_pid, "FROM team_memberships").await;
+
+        let transition_app = app.clone();
+        let transition_token = admin_token.clone();
+        let transition_request = tokio::spawn(async move {
+            call(
+                transition_app,
+                Method::POST,
+                &format!("/api/v1/quizzes/{quiz_id}/{transition}"),
+                Some(&transition_token),
+                (transition == "publish").then(|| json!({})),
+            )
+            .await
+        });
+        wait_for_blocked_query(&pool, mutation_pid, "FROM teams").await;
+
+        // With quiz -> team ordering, publish/close now owns the quiz row while
+        // add/edit owns the team row. Opening the gate deterministically creates
+        // a deadlock. Team -> membership -> quiz lets both requests finish.
+        membership_gate.commit().await.unwrap();
+        let (mutation_result, transition_result) =
+            tokio::time::timeout(Duration::from_secs(15), async {
+                tokio::join!(mutation, transition_request)
+            })
+            .await
+            .unwrap_or_else(|_| panic!("{case}: concurrent requests did not finish"));
+        let (mutation_status, mutation_body) = mutation_result.unwrap();
+        let (transition_status, transition_body) = transition_result.unwrap();
+        let expected_mutation_status = if edit {
+            StatusCode::OK
+        } else if transition == "publish" {
+            StatusCode::CREATED
+        } else {
+            StatusCode::CONFLICT
+        };
+        assert_eq!(
+            mutation_status, expected_mutation_status,
+            "{case}: mutation returned {mutation_body}"
+        );
+        assert_eq!(
+            transition_status,
+            if transition == "publish" {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            },
+            "{case}: transition returned {transition_body}"
+        );
+
+        let (stored_status, manually_closed) = sqlx::query_as::<_, (String, bool)>(
+            "SELECT status, manually_closed_at IS NOT NULL FROM quizzes WHERE id = $1",
+        )
+        .bind(quiz_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            stored_status,
+            if transition == "publish" {
+                "open"
+            } else {
+                "closed"
+            }
+        );
+        assert_eq!(manually_closed, transition == "close");
+
+        let versions = sqlx::query_as::<_, (i32, String)>(
+            "SELECT revisions.revision_no, versions.question_text
+             FROM quiz_revisions AS revisions
+             JOIN question_versions AS versions ON versions.quiz_revision_id = revisions.id
+             WHERE revisions.quiz_id = $1
+             ORDER BY revisions.revision_no, versions.position",
+        )
+        .bind(quiz_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let expected_versions = match (transition, edit) {
+            ("publish", false) => vec![(1, "Original question"), (1, "Added question")],
+            ("publish", true) => vec![(1, "Edited question")],
+            ("close", true) => vec![(1, "Original question"), (2, "Edited question")],
+            _ => vec![(1, "Original question")],
+        };
+        assert_eq!(
+            versions,
+            expected_versions
+                .into_iter()
+                .map(|(revision, question)| (revision, question.to_owned()))
+                .collect::<Vec<_>>(),
+            "{case}: saved revision snapshots"
+        );
+
+        let drafts = sqlx::query_scalar::<_, String>(
+            "SELECT question_text FROM draft_questions WHERE quiz_id = $1 ORDER BY position",
+        )
+        .bind(quiz_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let expected_drafts = if edit {
+            vec!["Edited question"]
+        } else if transition == "publish" {
+            vec!["Original question", "Added question"]
+        } else {
+            vec!["Original question"]
+        };
+        assert_eq!(drafts, expected_drafts, "{case}: saved draft questions");
+    }
+
+    pool.close().await;
 }
