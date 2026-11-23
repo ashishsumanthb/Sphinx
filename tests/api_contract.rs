@@ -2,11 +2,11 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use sqlx::postgres::PgPoolOptions;
 use sphinx::{
     AppState,
     api::{dto::PublicQuestionResponse, routes::participation_routes},
 };
+use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 use uuid::Uuid;
 

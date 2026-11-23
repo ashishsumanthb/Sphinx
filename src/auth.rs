@@ -1,6 +1,5 @@
-use crate::{AppState, password, session};
-
 pub use crate::session::AuthUser;
+use crate::{AppState, password, session};
 use axum::{
     Json, Router,
     extract::{State, rejection::JsonRejection},
@@ -27,7 +26,7 @@ struct UserResponse {
 
 #[derive(Serialize)]
 pub(crate) struct ErrorResponse {
-    error: &'static str,
+    pub(crate) error: &'static str,
 }
 
 #[derive(Deserialize)]

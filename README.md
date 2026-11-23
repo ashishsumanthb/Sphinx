@@ -15,6 +15,8 @@ Identity and teams functionality includes:
 - Eligible quiz discovery and revision-pinned attempt sessions.
 - Deterministic scoring, atomic persistence and idempotent retries.
 - Safe public questions and personal attempt retrieval.
+- PostgreSQL-backed quiz creation, question edits, publication, and manual closure.
+- Immutable published revisions and membership eligibility snapshots.
 
 See [`docs/PARTICIPATION_API.md`](docs/PARTICIPATION_API.md) for participation
 routes, security rules, database dependencies and integration notes.
@@ -63,6 +65,11 @@ Keep `.env` out of Git.
 | GET | /api/v1/teams | Own teams |
 | POST | /api/v1/teams/{team_id}/members | Team admin |
 | GET | /api/v1/teams/{team_id}/members | Team member or admin |
+| POST | /api/v1/teams/{team_id}/quizzes | Team admin |
+| POST | /api/v1/teams/{team_id}/quizzes/{quiz_id}/questions | Team admin; draft only |
+| PUT | /api/v1/teams/{team_id}/quizzes/{quiz_id}/questions/{question_id} | Team admin; creates a revision after publication |
+| POST | /api/v1/quizzes/{quiz_id}/publish | Team admin |
+| POST | /api/v1/quizzes/{quiz_id}/close | Team admin |
 
 Registration accepts `name`, `email` and `password`.
 Login accepts `email` and `password`.
@@ -74,6 +81,13 @@ Protected requests require this header:
     Authorization: Bearer YOUR_TOKEN
 
 Logout invalidates the current session.
+
+Authentication, session extraction, and team endpoints retain their established
+error contract: `{"error":"message"}`. Quiz-management handler validation,
+authorization, and database failures use the shared structured `AppError`
+envelope with `error.code`, `error.message`, and `error.request_id`. A missing or
+invalid session is rejected by the shared extractor before quiz-handler input
+parsing, using the established authentication response.
 
 ## Code organisation
 
@@ -92,20 +106,36 @@ Other modules can use `auth::AuthUser` to identify the caller.
 
 Use `permissions::require_member` or `permissions::require_admin`
 inside the same transaction as the protected database operation.
-Admin checks acquire the team lock before membership changes.
+All quiz-management writes use the same lock order: team, membership, then quiz.
+Publish and close first discover the quiz's team without a row lock, authorize
+and lock that team, then lock the quiz while rechecking the team ID. This avoids
+the lock cycle with concurrent add/edit operations.
 
 ## Verification
 
 Run:
 
-    cargo fmt --check
-    cargo check
-    cargo test
+    cargo fmt --all -- --check
+    cargo clippy --locked --all-targets -- -D warnings
+    cargo test --locked --all-targets
     git diff --check
 
-Current automated tests cover registration validation and demo
-password encoding. Login, logout and team permissions have also
-been checked manually through the API.
+The GitHub workflow also runs PostgreSQL workflow, lock-order, attempt-limit,
+and participation regressions against a disposable PostgreSQL 17 service.
+To run them locally, set `TEST_DATABASE_URL` to an isolated test database:
+
+```bash
+cargo test --locked --test quiz_management_postgres \
+  --test postgres_attempt_limits --test postgres_edge_cases \
+  -- --ignored --test-threads=1
+```
+
+These tests reset the database's `public` schema and must run serially. The
+quiz-management tests apply real migrations and exercise the full router and
+login/session extractor. The concurrency regression uses PostgreSQL's wait
+graph to synchronize publish/close versus add/edit; it checks responses and
+persisted quiz/revision state. API tests also preserve the existing authentication
+error contract across auth, team, participation, and quiz-management routes.
 
 ## Known limitations
 

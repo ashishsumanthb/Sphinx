@@ -26,7 +26,8 @@ pub(crate) async fn require_member(
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Team not found"))
 }
 
-// Lock the team before changing memberships or roles.
+// Lock order for team-scoped writes: team -> membership -> dependent rows
+// (including quizzes). Callers must not hold a quiz lock before this check.
 pub(crate) async fn require_admin(
     connection: &mut PgConnection,
     team_id: Uuid,
