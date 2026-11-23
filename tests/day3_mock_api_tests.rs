@@ -1,5 +1,5 @@
 use chrono::Utc;
-use standuppulse::api::dto::{
+use sphinx::api::dto::{
     AttemptQuestionReviewResponse, AttemptReviewResponse, MyAttemptResponse, MyResultsResponse,
     ParticipantAnalyticsResponse, QuizAnalyticsResponse,
 };
@@ -16,6 +16,7 @@ fn member_results_are_personal_and_revision_aware() {
         attempts: vec![MyAttemptResponse {
             attempt_id: Uuid::new_v4(),
             quiz_id: Uuid::new_v4(),
+            attempt_number: 1,
             score: 2,
             total_questions: 2,
             percentage: 100.0,

@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use standuppulse::{
+use sphinx::{
     api::dto::{AnswerInput, AttemptSessionResponse, PublicQuestionResponse},
     domain::participation::{
         AnswerSetError, QuestionKey, canonical_request_hash, validate_and_score,
@@ -103,6 +103,9 @@ fn day_two_session_dto_never_exposes_answer_keys() {
         quiz_revision_id: Uuid::new_v4(),
         started_at: now,
         deadline: now + Duration::minutes(15),
+        attempt_number: 1,
+        max_attempts: 2,
+        remaining_attempts: 2,
         questions: vec![PublicQuestionResponse {
             question_id: Uuid::new_v4(),
             position: 0,

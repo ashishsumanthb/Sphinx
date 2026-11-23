@@ -4,9 +4,9 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use sqlx::postgres::PgPoolOptions;
-use standuppulse::{
+use sphinx::{
     AppState,
-    api::{auth::AuthenticatedUser, routes::participation_routes},
+    api::routes::participation_routes,
 };
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -47,13 +47,13 @@ async fn every_member_three_route_requires_authentication() {
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(json["error"]["code"], "UNAUTHENTICATED");
+        assert_eq!(json["error"], "A valid login session is required");
     }
 }
 
 #[tokio::test]
-async fn oversized_submission_has_standard_error_envelope() {
-    let mut request = Request::builder()
+async fn oversized_unauthenticated_submission_is_rejected_before_body_parsing() {
+    let request = Request::builder()
         .method("POST")
         .uri(format!(
             "/api/v1/attempt-sessions/{}/submit",
@@ -62,13 +62,9 @@ async fn oversized_submission_has_standard_error_envelope() {
         .header("content-type", "application/json")
         .body(Body::from("x".repeat(1024 * 1024 + 1)))
         .unwrap();
-    request.extensions_mut().insert(AuthenticatedUser {
-        user_id: Uuid::new_v4(),
-    });
     let response = test_app().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(json["error"]["code"], "PAYLOAD_TOO_LARGE");
-    assert!(json["error"]["request_id"].as_str().unwrap().starts_with("req_"));
+    assert_eq!(json["error"], "A valid login session is required");
 }
