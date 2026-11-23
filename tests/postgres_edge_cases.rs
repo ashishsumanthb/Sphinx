@@ -2,7 +2,7 @@ use std::time::Duration as StdDuration;
 
 use chrono::{Duration, Utc};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use standuppulse::{
+use sphinx::{
     api::dto::AnswerInput,
     repository::participation::ParticipationRepository,
 };

@@ -8,7 +8,7 @@ middleware to insert `AuthenticatedUser` into the request extensions.
 
 | Method | Route | Behavior |
 | --- | --- | --- |
-| `GET` | `/api/v1/teams/{team_id}/quizzes/available` | Eligible, open quizzes that the user has not completed |
+| `GET` | `/api/v1/teams/{team_id}/quizzes/available` | Eligible, open quizzes where the user has an attempt remaining |
 | `POST` | `/api/v1/quizzes/{quiz_id}/attempt-sessions` | Starts or returns the user's active session |
 | `GET` | `/api/v1/attempt-sessions/{session_id}/questions` | Owner-only questions without answers or explanations |
 | `POST` | `/api/v1/attempt-sessions/{session_id}/submit` | Validates, scores, and atomically saves one attempt |
@@ -36,8 +36,14 @@ duplicates, missing answers, and invalid option indices return
 
 The submission transaction locks the quiz row, reads PostgreSQL
 `clock_timestamp()`, checks status, closing time, manual closure, eligibility,
-and the one-attempt constraint, then inserts the attempt and all answers before
+and the quiz's `max_attempts` limit, then inserts the numbered attempt and all answers before
 committing. No partial attempt is visible.
+
+Quizzes permit one or two completed attempts according to `max_attempts`.
+Attempts are stored with `attempt_no`, and `UNIQUE (quiz_id, user_id,
+attempt_no)` allows each permitted attempt while preventing duplicate attempt
+numbers. The independent unique `session_id` constraint still prevents the
+same session from being counted twice.
 
 Identical retries use an order-independent SHA-256 request hash and return the
 stored result with `idempotent_replay: true`, even after the quiz closes. A
@@ -92,3 +98,14 @@ Until those branches are integrated, `fixtures/participation_flow.json` provides
 design-aligned records for all upstream tables, the submission request, safe API
 responses, and the expected persisted attempt rows. The fixture is validated by
 `tests/mock_fixture.rs`, so DTO or relationship drift fails the test suite.
+
+## PostgreSQL attempt-limit test
+
+The integration test uses an isolated database because it resets the `public`
+schema. It proves that a one-attempt quiz rejects attempt 2 and a two-attempt
+quiz accepts attempt 2 but rejects attempt 3.
+
+```bash
+TEST_DATABASE_URL=postgres://postgres:edgepass@127.0.0.1:55433/sphinx_attempts \
+  cargo test --test postgres_attempt_limits -- --ignored --nocapture
+```

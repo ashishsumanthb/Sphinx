@@ -109,6 +109,9 @@
       "quiz_revision_id": "40000000-0000-4000-8000-000000000001",
       "started_at": "2026-11-22T09:31:00Z",
       "deadline": "2026-11-22T09:45:00Z",
+      "attempt_number": 1,
+      "max_attempts": 1,
+      "remaining_attempts": 1,
       "questions": [
         {
           "question_id": "50000000-0000-4000-8000-000000000001",
@@ -127,6 +130,9 @@
     "submission": {
       "attempt_id": "70000000-0000-4000-8000-000000000001",
       "quiz_id": "30000000-0000-4000-8000-000000000001",
+      "attempt_number": 1,
+      "max_attempts": 1,
+      "remaining_attempts": 0,
       "score": 1,
       "total_questions": 2,
       "percentage": 50.0,
@@ -136,6 +142,9 @@
     "identical_retry": {
       "attempt_id": "70000000-0000-4000-8000-000000000001",
       "quiz_id": "30000000-0000-4000-8000-000000000001",
+      "attempt_number": 1,
+      "max_attempts": 1,
+      "remaining_attempts": 0,
       "score": 1,
       "total_questions": 2,
       "percentage": 50.0,
@@ -147,6 +156,7 @@
         {
           "attempt_id": "70000000-0000-4000-8000-000000000001",
           "quiz_id": "30000000-0000-4000-8000-000000000001",
+          "attempt_number": 1,
           "score": 1,
           "total_questions": 2,
           "percentage": 50.0,
@@ -162,6 +172,7 @@
         "quiz_id": "30000000-0000-4000-8000-000000000001",
         "user_id": "10000000-0000-4000-8000-000000000001",
         "quiz_revision_id": "40000000-0000-4000-8000-000000000001",
+        "attempt_no": 1,
         "status": "submitted",
         "started_at": "2026-11-22T09:31:00Z"
       }
