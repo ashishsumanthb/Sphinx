@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f8f3" />
     <meta name="description" content="Sphinx — a friendly place to test what you know." />
+    <meta name="sphinx-api-base" content="http://127.0.0.1:8000" />
     <title>Sphinx — Learn. Play. Grow.</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -137,10 +138,41 @@
 
           <div class="success-state" id="success-state" aria-live="polite">
             <div class="success-icon">✓</div>
-            <span class="kicker">YOU'RE ALL SET</span>
-            <h2>Nice to see you.</h2>
-            <p>This frontend is ready. Connect the form to your authentication API when your backend is set up.</p>
-            <button class="secondary-button" type="button" id="reset-demo">Back to login</button>
+            <span class="kicker">SIGNED IN</span>
+            <h2>Nice to see you, <span id="signed-in-name">friend</span>.</h2>
+            <p class="session-copy">Enter a quiz ID to load your personal results, attempt history, and revision rankings.</p>
+
+            <form class="results-form" id="results-form">
+              <label class="field results-quiz-field">
+                <span>Quiz ID</span>
+                <input id="results-quiz-id" name="quizId" type="text" inputmode="text" autocomplete="off" placeholder="00000000-0000-0000-0000-000000000000" required />
+                <small class="error-message"></small>
+              </label>
+              <button class="primary-button results-submit" type="submit"><span>Load my results</span><b aria-hidden="true">→</b></button>
+            </form>
+
+            <section class="results-view is-hidden" id="results-view" aria-live="polite">
+              <div class="result-summary">
+                <article><small>BEST SCORE</small><strong id="best-score">—</strong></article>
+                <article><small>BEST RESULT</small><strong id="best-percentage">—</strong></article>
+                <article><small>LATEST RANK</small><strong id="latest-rank">—</strong></article>
+              </div>
+
+              <div class="results-section">
+                <div class="results-section-heading">
+                  <div><span class="kicker">BY REVISION</span><h3>Revision rankings</h3></div>
+                  <span class="revision-badge" id="latest-revision">No attempts</span>
+                </div>
+                <div class="results-list" id="revision-results"></div>
+              </div>
+
+              <div class="results-section">
+                <div class="results-section-heading"><div><span class="kicker">HISTORY</span><h3>Your attempts</h3></div></div>
+                <div class="results-list" id="attempt-results"></div>
+              </div>
+            </section>
+
+            <button class="secondary-button logout-button" type="button" id="logout-button">Log out</button>
           </div>
         </div>
 

@@ -193,3 +193,57 @@ async fn login_and_registration_preserve_string_error_contract() {
         );
     }
 }
+
+#[tokio::test]
+async fn local_frontend_origin_can_call_the_api_with_a_bearer_token() {
+    let response = app(test_state())
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/api/v1/quizzes/00000000-0000-4000-8000-000000000001/my-results")
+                .header("origin", "http://127.0.0.1:3000")
+                .header("access-control-request-method", "GET")
+                .header("access-control-request-headers", "authorization")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .unwrap(),
+        "http://127.0.0.1:3000"
+    );
+    assert!(
+        response
+            .headers()
+            .get("access-control-allow-headers")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("authorization")
+    );
+
+    let rejected_origin = app(test_state())
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/api/v1/auth/login")
+                .header("origin", "https://untrusted.example")
+                .header("access-control-request-method", "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        rejected_origin
+            .headers()
+            .get("access-control-allow-origin")
+            .is_none()
+    );
+}
