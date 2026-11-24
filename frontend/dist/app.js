@@ -87,6 +87,7 @@ const preparedQuestions = [
 
 let demoWorkspace = null;
 let activeAttempt = null;
+let quizCountdownTimer = null;
 let teamMemberships = [];
 let selectedTeam = null;
 let teamMembers = [];
@@ -603,6 +604,7 @@ document.querySelector('#copy-user-id').addEventListener('click', async () => {
 });
 
 function showLogin() {
+  clearQuizCountdown();
   teamContextRequest += 1;
   availableQuizzesRequest += 1;
   teamMembersRequest += 1;
@@ -829,11 +831,17 @@ document.querySelector('#publish-demo').addEventListener('click', async (event) 
 });
 
 function renderQuizPlayer(attempt) {
+  clearQuizCountdown();
   const player = document.querySelector('#quiz-player');
   player.replaceChildren();
   const meta = document.createElement('p');
   meta.className = 'quiz-meta';
-  meta.textContent = `Attempt ${attempt.attempt_number} of ${attempt.max_attempts} · closes ${formatDateTime(attempt.deadline, { timeStyle: 'short' })}`;
+  const attemptLabel = document.createElement('span');
+  attemptLabel.textContent = `Attempt ${attempt.attempt_number} of ${attempt.max_attempts}`;
+  const countdown = document.createElement('strong');
+  countdown.className = 'quiz-countdown';
+  countdown.setAttribute('aria-live', 'polite');
+  meta.append(attemptLabel, countdown);
   player.append(meta);
   attempt.questions.forEach((question, questionIndex) => {
     const fieldset = document.createElement('fieldset');
@@ -861,6 +869,36 @@ function renderQuizPlayer(attempt) {
   submit.innerHTML = '<span>Submit answers</span><b aria-hidden="true">→</b>';
   player.append(submit);
   player.classList.remove('is-hidden');
+  startQuizCountdown(attempt.deadline, countdown, submit);
+}
+
+function clearQuizCountdown() {
+  if (quizCountdownTimer !== null) {
+    window.clearInterval(quizCountdownTimer);
+    quizCountdownTimer = null;
+  }
+}
+
+function startQuizCountdown(deadlineValue, output, submitButton) {
+  const deadline = new Date(deadlineValue).getTime();
+  if (!Number.isFinite(deadline)) {
+    output.textContent = 'Time unavailable';
+    return;
+  }
+  const update = () => {
+    const secondsLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    const minutes = Math.floor(secondsLeft / 60);
+    const seconds = String(secondsLeft % 60).padStart(2, '0');
+    output.textContent = `${minutes}:${seconds} left`;
+    output.classList.toggle('is-expired', secondsLeft === 0);
+    if (secondsLeft === 0) {
+      submitButton.disabled = true;
+      clearQuizCountdown();
+      showToast('The quiz window has closed. New submissions are no longer accepted.');
+    }
+  };
+  update();
+  if (deadline > Date.now()) quizCountdownTimer = window.setInterval(update, 1000);
 }
 
 document.querySelector('#start-demo-quiz').addEventListener('click', async (event) => {
@@ -897,6 +935,7 @@ document.querySelector('#quiz-player').addEventListener('submit', async (event) 
     const result = await apiRequest(`/api/v1/attempt-sessions/${activeAttempt.session_id}/submit`, {
       method: 'POST', token: session.token, body: { answers }
     });
+    clearQuizCountdown();
     player.classList.add('is-hidden');
     const summary = document.querySelector('#submission-result');
     summary.textContent = `Submitted successfully: ${result.score}/${result.total_questions} (${formatPercentage(result.percentage)}). ${result.remaining_attempts} attempt(s) remaining.`;

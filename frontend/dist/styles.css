@@ -296,7 +296,9 @@ input::placeholder { color: #a7afa9; }
 .available-quiz small { color: var(--muted); font-size: 9px; }
 .participant-quiz-id { margin-top: 15px; text-align: left; }
 .quiz-player { display: grid; gap: 13px; }
-.quiz-meta { margin: 0; color: var(--muted); font-size: 10px; text-align: center; }
+.quiz-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 11px 13px; border-radius: 11px; background: #eee9ff; color: var(--muted); font-size: 10px; }
+.quiz-countdown { color: var(--primary-deep); font: 800 21px/1 "Manrope", sans-serif; letter-spacing: -.03em; }
+.quiz-countdown.is-expired { color: #b33935; }
 .play-question { display: grid; gap: 7px; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: white; }
 .play-question legend { padding: 0 5px; font-size: 12px; font-weight: 800; }
 .answer-option { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 8px; background: #f5f6f1; color: var(--muted); font-size: 11px; cursor: pointer; }
