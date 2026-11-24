@@ -196,7 +196,7 @@ function apiStatusLabel(record) {
   if (record.state === 'pending') return 'Running';
   if (record.state === 'success') return `${record.status} OK`;
   if (record.state === 'error') return record.status ? `${record.status} Failed` : 'Network error';
-  return 'Not used';
+  return 'Not called yet';
 }
 
 function renderApiMonitor() {
@@ -233,7 +233,7 @@ function renderApiMonitor() {
       route.textContent = path;
       const status = document.createElement('span');
       status.className = 'api-status';
-      status.innerHTML = '<i class="api-dot"></i><span>Not used</span>';
+      status.innerHTML = '<i class="api-dot"></i><span>Not called yet</span>';
       summary.append(methodBadge, route, status);
       const body = document.createElement('div');
       body.className = 'api-endpoint-body';
