@@ -320,8 +320,9 @@ input::placeholder { color: #a7afa9; }
 .api-monitor-summary span { display: flex; align-items: center; gap: 5px; padding: 6px 8px; border-radius: 8px; background: white; color: var(--muted); font-size: 9px; }
 .api-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #a8afa9; }
 .api-dot-success { background: #35a65a; }.api-dot-pending { background: #e4a224; }.api-dot-error { background: #d9534f; }
-.api-monitor-groups { flex: 1; display: grid; gap: 11px; overflow-y: auto; padding-right: 4px; }
+.api-monitor-groups { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .api-owner-group { border: 1px solid var(--line); border-radius: 13px; background: white; overflow: hidden; }
+.api-owner-group + .api-owner-group { margin-top: 11px; }
 .api-owner-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 13px; background: #f2f3ee; }
 .api-owner-heading strong, .api-owner-heading small { display: block; }
 .api-owner-heading strong { color: var(--primary-deep); font-size: 12px; }.api-owner-heading small { margin-top: 2px; color: var(--muted); font-size: 8px; }
