@@ -149,6 +149,15 @@
               <button class="secondary-button compact-button" id="refresh-teams" type="button">Refresh</button>
             </div>
 
+            <section class="member-quiz-dashboard is-hidden" id="member-quiz-dashboard">
+              <div class="member-dashboard-heading">
+                <div><span class="kicker">YOUR QUIZZES</span><h3>Available now</h3></div>
+                <span class="revision-badge" id="dashboard-quiz-count">0 quizzes</span>
+              </div>
+              <p id="dashboard-available-copy">Loading quizzes assigned to you…</p>
+              <div class="available-quizzes dashboard-quiz-list" id="dashboard-available-quizzes"></div>
+            </section>
+
             <nav class="workspace-tabs" aria-label="Sphinx workspace">
               <button class="workspace-tab is-active" type="button" data-workspace="studio">Admin studio</button>
               <button class="workspace-tab" type="button" data-workspace="play">Take quiz</button>

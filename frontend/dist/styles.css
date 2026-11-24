@@ -250,6 +250,11 @@ input::placeholder { color: #a7afa9; }
 .team-role small, .team-role strong { display: block; }
 .team-role small { color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .8px; }
 .team-role strong { margin-top: 4px; color: var(--primary-deep); font-size: 10px; }
+.member-quiz-dashboard { margin-top: 14px; padding: 16px; border: 1px solid #cfc4ef; border-radius: 15px; background: linear-gradient(135deg, #f7f3ff, #fff); text-align: left; }
+.member-dashboard-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.member-dashboard-heading h3 { margin: 4px 0 0; color: var(--primary-deep); font: 800 18px "Manrope", sans-serif; }
+.member-quiz-dashboard > p { margin: 9px 0 0; color: var(--muted); font-size: 10px; }
+.dashboard-quiz-list { margin-top: 11px; }
 .workspace-tab { padding: 10px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 800; cursor: pointer; }
 .workspace-tab.is-active { background: white; color: var(--primary-deep); box-shadow: 0 4px 14px rgba(32,54,41,.09); }
 .workspace-panel { padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: #f8f9f5; text-align: left; }

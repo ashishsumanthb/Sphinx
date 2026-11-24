@@ -464,8 +464,10 @@ async function loadTeamContext(preferredTeamId = demoWorkspace?.teamId) {
 
 function applySelectedTeamRole() {
   const studioTab = document.querySelector('[data-workspace="studio"]');
+  const memberDashboard = document.querySelector('#member-quiz-dashboard');
   const isAdmin = selectedTeam?.role === 'admin';
   studioTab.classList.toggle('is-hidden', !isAdmin);
+  memberDashboard.classList.toggle('is-hidden', !selectedTeam || isAdmin);
   document.querySelector('#team-role-label').textContent = selectedTeam
     ? selectedTeam.role === 'admin' ? 'Team administrator' : 'Team member'
     : 'No membership';
@@ -557,7 +559,9 @@ document.querySelector('#refresh-teams').addEventListener('click', () => loadTea
 async function loadAvailableQuizzes(teamId) {
   const requestId = ++availableQuizzesRequest;
   const copy = document.querySelector('#available-copy');
+  const dashboardCopy = document.querySelector('#dashboard-available-copy');
   copy.textContent = 'Loading eligible quizzes…';
+  dashboardCopy.textContent = 'Loading quizzes assigned to you…';
   try {
     const response = await apiRequest(`/api/v1/teams/${teamId}/quizzes/available`, { token: session.token });
     if (requestId !== availableQuizzesRequest || selectedTeam?.id !== teamId) return;
@@ -566,32 +570,51 @@ async function loadAvailableQuizzes(teamId) {
     copy.textContent = quizzes.length
       ? 'Choose an open quiz from this team.'
       : 'No eligible open quizzes are available for this team.';
+    dashboardCopy.textContent = quizzes.length
+      ? 'Select a quiz to open it in the quiz player.'
+      : 'You have no assigned quizzes that are currently open.';
   } catch (error) {
     if (requestId !== availableQuizzesRequest) return;
     renderAvailableQuizzes([]);
     copy.textContent = error.message;
+    dashboardCopy.textContent = error.message;
   }
 }
 
 function renderAvailableQuizzes(quizzes) {
-  const container = document.querySelector('#available-quizzes');
-  container.replaceChildren();
-  quizzes.forEach((quiz) => {
+  document.querySelector('#dashboard-quiz-count').textContent = `${quizzes.length} ${quizzes.length === 1 ? 'quiz' : 'quizzes'}`;
+  for (const container of [
+    document.querySelector('#available-quizzes'),
+    document.querySelector('#dashboard-available-quizzes')
+  ]) {
+    container.replaceChildren();
+    quizzes.forEach((quiz) => container.append(createAvailableQuizButton(quiz, container.id === 'dashboard-available-quizzes')));
+  }
+}
+
+function createAvailableQuizButton(quiz, fromDashboard) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'available-quiz';
     const title = document.createElement('strong');
     title.textContent = quiz.title;
     const detail = document.createElement('small');
-    detail.textContent = `Open until ${formatDateTime(quiz.ends_at, { timeStyle: 'short' })}`;
+    detail.textContent = `Open until ${formatDateTime(quiz.ends_at, { timeStyle: 'short' })} · ${formatTimeRemaining(quiz.ends_at)}`;
     button.append(title, detail);
     button.addEventListener('click', () => {
       document.querySelector('#play-quiz-id').value = quiz.id;
       updateStartAvailability();
       document.querySelector('#play-availability').textContent = 'Eligible · open';
+      if (fromDashboard) switchWorkspace('play');
     });
-    container.append(button);
-  });
+    return button;
+}
+
+function formatTimeRemaining(value) {
+  const milliseconds = new Date(value).getTime() - Date.now();
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return 'closing now';
+  const totalMinutes = Math.ceil(milliseconds / 60000);
+  return totalMinutes < 60 ? `${totalMinutes} min left` : `${Math.floor(totalMinutes / 60)} hr left`;
 }
 
 document.querySelector('#copy-user-id').addEventListener('click', async () => {
@@ -611,6 +634,7 @@ function showLogin() {
   teamMemberships = [];
   selectedTeam = null;
   teamMembers = [];
+  document.querySelector('#member-quiz-dashboard').classList.add('is-hidden');
   successState.classList.remove('is-visible');
   resultsView.classList.add('is-hidden');
   authWrap.classList.remove('results-mode');
