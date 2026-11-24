@@ -258,6 +258,25 @@
       </section>
     </main>
 
+    <button class="api-monitor-toggle" id="api-monitor-toggle" type="button" aria-controls="api-monitor" aria-expanded="false">
+      <span class="api-monitor-pulse" aria-hidden="true"></span>
+      API status
+      <strong id="api-monitor-count">0/24</strong>
+    </button>
+    <div class="api-monitor-backdrop is-hidden" id="api-monitor-backdrop"></div>
+    <aside class="api-monitor" id="api-monitor" aria-hidden="true" aria-label="Project API status">
+      <header class="api-monitor-header">
+        <div><span class="kicker">LIVE API MAP</span><h2>Who built what</h2><p>Open an endpoint to see what it does. Status updates as you use the app.</p></div>
+        <button class="api-monitor-close" id="api-monitor-close" type="button" aria-label="Close API status">×</button>
+      </header>
+      <div class="api-monitor-summary">
+        <span><i class="api-dot api-dot-success"></i><b id="api-success-count">0</b> successful</span>
+        <span><i class="api-dot api-dot-pending"></i><b id="api-pending-count">0</b> running</span>
+        <span><i class="api-dot api-dot-error"></i><b id="api-error-count">0</b> failed</span>
+      </div>
+      <div class="api-monitor-groups" id="api-monitor-groups"></div>
+    </aside>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="./app.js"></script>
   </body>

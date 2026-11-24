@@ -15,6 +15,55 @@ const API_BASE = (apiOverride || apiMeta?.content || window.location.origin).rep
 const SESSION_KEY = 'sphinx.auth.session';
 const DEMO_KEY = 'sphinx.demo.workspace';
 
+const apiOwners = [
+  {
+    name: 'Gangadhar', area: 'Authentication, teams and PostgreSQL foundation', endpoints: [
+      ['GET', '/health/live', /^\/health\/live$/, 'Health check', 'Confirms that the Axum service is running.'],
+      ['POST', '/api/v1/auth/register', /^\/api\/v1\/auth\/register$/, 'Register account', 'Validates and stores a new user account.'],
+      ['POST', '/api/v1/auth/login', /^\/api\/v1\/auth\/login$/, 'Login', 'Verifies credentials and creates an expiring session token.'],
+      ['GET', '/api/v1/auth/me', /^\/api\/v1\/auth\/me$/, 'Current user', 'Returns the user identified by the Bearer token.'],
+      ['POST', '/api/v1/auth/logout', /^\/api\/v1\/auth\/logout$/, 'Logout', 'Revokes the current login session.'],
+      ['POST', '/api/v1/teams', /^\/api\/v1\/teams\/?$/, 'Create team', 'Creates a team and makes its creator the administrator.'],
+      ['GET', '/api/v1/teams', /^\/api\/v1\/teams\/?$/, 'List teams', 'Lists teams and roles for the authenticated user.'],
+      ['POST', '/api/v1/teams/{team_id}/members', /^\/api\/v1\/teams\/[^/]+\/members$/, 'Add member', 'Adds an existing user to a team after an admin check.'],
+      ['GET', '/api/v1/teams/{team_id}/members', /^\/api\/v1\/teams\/[^/]+\/members$/, 'List members', 'Returns team members and their roles.']
+    ]
+  },
+  {
+    name: 'Ashish', area: 'Quiz lifecycle, validation and revisions', endpoints: [
+      ['POST', '/questions/validate', /^\/questions\/validate$/, 'Validate question', 'Runs the Rust question business rules without writing to the database.'],
+      ['POST', '/api/v1/teams/{team_id}/quizzes', /^\/api\/v1\/teams\/[^/]+\/quizzes$/, 'Create draft quiz', 'Admin-only creation of a saved, unpublished quiz.'],
+      ['POST', '/api/v1/teams/{team_id}/quizzes/{quiz_id}/questions', /^\/api\/v1\/teams\/[^/]+\/quizzes\/[^/]+\/questions$/, 'Add question', 'Validates and stores a question in the draft.'],
+      ['PUT', '/api/v1/teams/{team_id}/quizzes/{quiz_id}/questions/{question_id}', /^\/api\/v1\/teams\/[^/]+\/quizzes\/[^/]+\/questions\/[^/]+$/, 'Edit or revise question', 'Updates a draft or creates an immutable revision after publication.'],
+      ['PUT', '/api/v1/quizzes/{quiz_id}/eligibilities', /^\/api\/v1\/quizzes\/[^/]+\/eligibilities$/, 'Assign participants', 'Verifies and saves the selected team members for a draft quiz.'],
+      ['POST', '/api/v1/quizzes/{quiz_id}/publish', /^\/api\/v1\/quizzes\/[^/]+\/publish$/, 'Publish quiz', 'Atomically creates a revision, question versions and the open time window.'],
+      ['POST', '/api/v1/quizzes/{quiz_id}/close', /^\/api\/v1\/quizzes\/[^/]+\/close$/, 'Close quiz', 'Admin-only early closure using PostgreSQL time and locks.']
+    ]
+  },
+  {
+    name: 'Abhishek', area: 'Participation, scoring, review and analytics API', endpoints: [
+      ['GET', '/api/v1/teams/{team_id}/quizzes/available', /^\/api\/v1\/teams\/[^/]+\/quizzes\/available$/, 'Available quizzes', 'Lists open eligible quizzes with attempts remaining.'],
+      ['POST', '/api/v1/quizzes/{quiz_id}/attempt-sessions', /^\/api\/v1\/quizzes\/[^/]+\/attempt-sessions$/, 'Start attempt', 'Checks eligibility and pins the member to a quiz revision.'],
+      ['GET', '/api/v1/attempt-sessions/{session_id}/questions', /^\/api\/v1\/attempt-sessions\/[^/]+\/questions$/, 'Session questions', 'Returns public questions without answer keys.'],
+      ['POST', '/api/v1/attempt-sessions/{session_id}/submit', /^\/api\/v1\/attempt-sessions\/[^/]+\/submit$/, 'Submit answers', 'Validates, scores and atomically saves one attempt.'],
+      ['GET', '/api/v1/quizzes/{quiz_id}/my-attempts', /^\/api\/v1\/quizzes\/[^/]+\/my-attempts$/, 'Attempt history', 'Returns only the authenticated member’s attempts.'],
+      ['GET', '/api/v1/attempts/{attempt_id}/review', /^\/api\/v1\/attempts\/[^/]+\/review$/, 'Attempt review', 'Returns post-submission answers and explanations to an authorized user.'],
+      ['GET', '/api/v1/quizzes/{quiz_id}/analytics', /^\/api\/v1\/quizzes\/[^/]+\/analytics$/, 'Quiz analytics', 'Returns team-wide participation and rankings to an administrator.']
+    ]
+  },
+  {
+    name: 'Sushma', area: 'Personal insights and revision-aware results', endpoints: [
+      ['GET', '/api/v1/quizzes/{quiz_id}/my-results', /^\/api\/v1\/quizzes\/[^/]+\/my-results$/, 'My results', 'Returns personal attempts, latest-revision summary and revision-specific rank.']
+    ]
+  }
+];
+
+const apiStates = new Map();
+apiOwners.forEach((owner) => owner.endpoints.forEach((endpoint, index) => {
+  endpoint.key = `${owner.name}-${index}`;
+  apiStates.set(endpoint.key, { state: 'idle', status: null, time: null });
+}));
+
 const preparedQuestions = [
   {
     question_text: 'What does PostgreSQL provide during quiz publication?',
@@ -127,7 +176,124 @@ function errorMessage(payload, fallback) {
   return fallback;
 }
 
+function findApiEndpoint(method, path) {
+  const pathname = path.split('?')[0];
+  for (const owner of apiOwners) {
+    for (const endpoint of owner.endpoints) {
+      if (endpoint[0] === method && endpoint[2].test(pathname)) return endpoint;
+    }
+  }
+  return null;
+}
+
+function setApiState(endpoint, state, status = null) {
+  if (!endpoint) return;
+  apiStates.set(endpoint.key, { state, status, time: new Date() });
+  updateApiMonitor();
+}
+
+function apiStatusLabel(record) {
+  if (record.state === 'pending') return 'Running';
+  if (record.state === 'success') return `${record.status} OK`;
+  if (record.state === 'error') return record.status ? `${record.status} Failed` : 'Network error';
+  return 'Not used';
+}
+
+function renderApiMonitor() {
+  const container = document.querySelector('#api-monitor-groups');
+  container.replaceChildren();
+  apiOwners.forEach((owner) => {
+    const section = document.createElement('section');
+    section.className = 'api-owner-group';
+    const heading = document.createElement('div');
+    heading.className = 'api-owner-heading';
+    const identity = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = owner.name;
+    const area = document.createElement('small');
+    area.textContent = owner.area;
+    identity.append(name, area);
+    const count = document.createElement('span');
+    count.textContent = `${owner.endpoints.length} APIs`;
+    heading.append(identity, count);
+    section.append(heading);
+
+    owner.endpoints.forEach((endpoint) => {
+      const [method, path, , title, description] = endpoint;
+      const details = document.createElement('details');
+      details.className = 'api-endpoint';
+      details.dataset.apiKey = endpoint.key;
+      details.dataset.state = 'idle';
+      const summary = document.createElement('summary');
+      const methodBadge = document.createElement('span');
+      methodBadge.className = 'api-method';
+      methodBadge.textContent = method;
+      const route = document.createElement('span');
+      route.className = 'api-path';
+      route.textContent = path;
+      const status = document.createElement('span');
+      status.className = 'api-status';
+      status.innerHTML = '<i class="api-dot"></i><span>Not used</span>';
+      summary.append(methodBadge, route, status);
+      const body = document.createElement('div');
+      body.className = 'api-endpoint-body';
+      const purpose = document.createElement('p');
+      const bold = document.createElement('b');
+      bold.textContent = `${title}: `;
+      purpose.append(bold, description);
+      const activity = document.createElement('p');
+      activity.className = 'api-last-activity';
+      activity.textContent = 'Not called during this browser session.';
+      body.append(purpose, activity);
+      details.append(summary, body);
+      section.append(details);
+    });
+    container.append(section);
+  });
+  updateApiMonitor();
+}
+
+function updateApiMonitor() {
+  const records = [...apiStates.values()];
+  const used = records.filter((record) => record.state !== 'idle').length;
+  document.querySelector('#api-monitor-count').textContent = `${used}/${records.length}`;
+  document.querySelector('#api-success-count').textContent = records.filter((record) => record.state === 'success').length;
+  document.querySelector('#api-pending-count').textContent = records.filter((record) => record.state === 'pending').length;
+  document.querySelector('#api-error-count').textContent = records.filter((record) => record.state === 'error').length;
+  apiStates.forEach((record, key) => {
+    const row = document.querySelector(`[data-api-key="${key}"]`);
+    if (!row) return;
+    row.dataset.state = record.state;
+    const dot = row.querySelector('.api-dot');
+    dot.className = `api-dot${record.state === 'idle' ? '' : ` api-dot-${record.state}`}`;
+    row.querySelector('.api-status span').textContent = apiStatusLabel(record);
+    row.querySelector('.api-last-activity').textContent = record.time
+      ? `Last called at ${new Intl.DateTimeFormat(undefined, { timeStyle: 'medium' }).format(record.time)}.`
+      : 'Not called during this browser session.';
+  });
+}
+
+function setApiMonitorOpen(open) {
+  const panel = document.querySelector('#api-monitor');
+  const toggle = document.querySelector('#api-monitor-toggle');
+  panel.classList.toggle('is-open', open);
+  panel.setAttribute('aria-hidden', String(!open));
+  toggle.setAttribute('aria-expanded', String(open));
+  document.querySelector('#api-monitor-backdrop').classList.toggle('is-hidden', !open);
+}
+
+document.querySelector('#api-monitor-toggle').addEventListener('click', () => setApiMonitorOpen(true));
+document.querySelector('#api-monitor-close').addEventListener('click', () => setApiMonitorOpen(false));
+document.querySelector('#api-monitor-backdrop').addEventListener('click', () => setApiMonitorOpen(false));
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setApiMonitorOpen(false);
+});
+
+renderApiMonitor();
+
 async function apiRequest(path, { method = 'GET', body, token } = {}) {
+  const endpoint = findApiEndpoint(method, path);
+  setApiState(endpoint, 'pending');
   const headers = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -140,8 +306,11 @@ async function apiRequest(path, { method = 'GET', body, token } = {}) {
       body: body === undefined ? undefined : JSON.stringify(body)
     });
   } catch {
+    setApiState(endpoint, 'error');
     throw new Error(`Cannot reach the Sphinx API at ${API_BASE}. Start the backend and try again.`);
   }
+
+  setApiState(endpoint, response.ok ? 'success' : 'error', response.status);
 
   const text = await response.text();
   let payload = null;
